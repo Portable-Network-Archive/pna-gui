@@ -6,7 +6,7 @@
     "distDir": "../src/dist"
   },
   "package": {
-    "productName": "pna-gui",
+    "productName": "Portable Network Archive",
     "version": "0.0.0"
   },
   "tauri": {
