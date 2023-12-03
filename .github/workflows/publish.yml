@@ -6,6 +6,8 @@ on:
 
 jobs:
   publish-tauri:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -38,3 +40,5 @@ jobs:
         releaseBody: "See the assets to download this version and install."
         releaseDraft: true
         prerelease: false
+        includeUpdaterJson: true
+        updaterJsonKeepUniversal: true
