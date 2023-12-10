@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 import "./App.css";
@@ -6,6 +6,20 @@ import "./App.css";
 function App() {
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const extract = (path: string) => {
+    setProcessing(true);
+    // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
+    invoke("extract", { path })
+      .then(() => {
+        setProcessing(false);
+      })
+      .catch((err) => {
+        window.alert(err);
+        setProcessing(false);
+      });
+  };
 
   useEffect(() => {
     const unlisten = appWindow.onFileDropEvent((e) => {
@@ -13,16 +27,7 @@ function App() {
         return;
       }
       for (const path of e.payload.paths) {
-        setProcessing(true);
-        // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-        invoke("extract", { path })
-          .then(() => {
-            setProcessing(false);
-          })
-          .catch((err) => {
-            window.alert(err);
-            setProcessing(false);
-          });
+        extract(path);
       }
     });
     return () => {
@@ -52,7 +57,16 @@ function App() {
       {!processing && (
         <div className="row">
           <h1>
-            <b>Drop here to extract PNA file.</b>
+            <label htmlFor="extract_file">
+              <b>Drop here to extract PNA file.</b>
+            </label>
+            <input
+              ref={inputRef}
+              id="extract_file"
+              className="hidden"
+              type="file"
+              accept=".pna"
+            />
           </h1>
         </div>
       )}
