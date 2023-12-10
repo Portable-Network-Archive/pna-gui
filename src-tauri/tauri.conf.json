@@ -13,8 +13,7 @@
     "updater": {
       "active": true,
       "endpoints": [
-        "https://gist.github.com/ChanTsune/505f1e1a80264b6ab163a799c3c99b3d/raw",
-        "https://gist.githubusercontent.com/ChanTsune/505f1e1a80264b6ab163a799c3c99b3d/raw"
+        "https://github.com/portable-network-archive/pna-gui/releases/latest/download/latest.json"
       ],
       "dialog": true,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZEMUQ5RjE5MkRBRDkyNUEKUldSYWtxMHRHWjhkL1dkdk9HZHV6VlVibGJrdlNjdXBRRDk2aVRlK0x0OHlrcnpIY3dJV1h5UXMK",
