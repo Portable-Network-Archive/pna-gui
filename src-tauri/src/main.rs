@@ -3,9 +3,11 @@
 
 use std::{fs, io, path::Path};
 
+#[cfg(target_os = "macos")]
+use tauri::MenuEntry;
 #[cfg(not(target_os = "macos"))]
 use tauri::Submenu;
-use tauri::{CustomMenuItem, Menu, MenuEntry, Window};
+use tauri::{CustomMenuItem, Menu, Window};
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
@@ -47,11 +49,13 @@ fn _extract(window: Window, path: &str) -> io::Result<()> {
 }
 
 const MENU_UPDATE_CHECK: &str = "update check";
+const MENU_EXTRACT_FILE: &str = "extract file";
 
 fn main() {
     let context = tauri::generate_context!();
     let mut menu = Menu::os_default(&context.package_info().name);
     let update_check = CustomMenuItem::new(MENU_UPDATE_CHECK, "Check for updates...");
+    let extract_file = CustomMenuItem::new(MENU_EXTRACT_FILE, "Extract");
     #[cfg(target_os = "macos")]
     if let MenuEntry::Submenu(sub_menu) = &mut menu.items[0] {
         sub_menu
@@ -59,9 +63,17 @@ fn main() {
             .items
             .insert(1, MenuEntry::CustomItem(update_check));
     }
+    #[cfg(target_os = "macos")]
+    if let MenuEntry::Submenu(sub_menu) = &mut menu.items[1] {
+        sub_menu
+            .inner
+            .items
+            .insert(0, MenuEntry::CustomItem(extract_file.accelerator("Cmd+O")));
+    }
     #[cfg(not(target_os = "macos"))]
     {
         menu = menu.add_submenu(Submenu::new("Tools", Menu::new().add_item(update_check)));
+        menu = menu.add_item(extract_file.accelerator("Ctrl+O"));
     }
 
     tauri::Builder::default()
@@ -73,6 +85,9 @@ fn main() {
                         .window()
                         .emit_and_trigger("tauri://update", ())
                         .unwrap();
+                }
+                MENU_EXTRACT_FILE => {
+                    event.window().emit("open_extract", ()).unwrap();
                 }
                 m => println!("{}", m),
             };

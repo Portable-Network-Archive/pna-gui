@@ -30,17 +30,19 @@ function App() {
         extract(path);
       }
     });
-    return () => {
-      unlisten.then((it) => it());
-    };
-  }, []);
-
-  useEffect(() => {
-    const unlisten = appWindow.listen<string>("extract_processing", (e) => {
-      setName(e.payload);
+    const unlistenExtractProcessing = appWindow.listen<string>(
+      "extract_processing",
+      (e) => {
+        setName(e.payload);
+      },
+    );
+    const unlistenOpenExtract = appWindow.listen<void>("open_extract", () => {
+      inputRef.current?.click();
     });
     return () => {
       unlisten.then((it) => it());
+      unlistenExtractProcessing.then((it) => it());
+      unlistenOpenExtract.then((it) => it());
     };
   }, []);
 
