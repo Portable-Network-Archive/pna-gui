@@ -2354,7 +2354,6 @@ dependencies = [
 name = "pna-gui"
 version = "0.0.2"
 dependencies = [
- "anyhow",
  "libpna",
  "serde",
  "serde_json",
