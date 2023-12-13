@@ -15,10 +15,15 @@ fn greet(name: &str) -> String {
 
 #[tauri::command(async)]
 fn extract(window: Window, path: &str) -> tauri::Result<()> {
-    Ok(_extract(window, path)?)
+    Ok(_extract(path, |name| {
+        let _ = window.emit("extract_processing", name);
+    })?)
 }
 
-fn _extract(window: Window, path: &str) -> io::Result<()> {
+fn _extract<OnStart>(path: &str, on_start_extract_entry: OnStart) -> io::Result<()>
+where
+    OnStart: Fn(&Path),
+{
     let path: &Path = path.as_ref();
     let file_name: &Path = path.file_stem().unwrap_or("pna".as_ref()).as_ref();
     let dir = if let Some(parent) = path.parent() {
@@ -34,7 +39,7 @@ fn _extract(window: Window, path: &str) -> io::Result<()> {
             continue;
         }
         let name = entry.header().path().as_path();
-        let _ = window.emit("extract_processing", name);
+        on_start_extract_entry(name);
         let name = dir.join(name);
         if let Some(parent) = name.parent() {
             fs::create_dir_all(parent)?;
