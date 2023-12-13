@@ -40,7 +40,7 @@ fn _extract(window: Window, path: &str) -> io::Result<()> {
             fs::create_dir_all(parent)?;
         }
         let mut writer = fs::File::create(name)?;
-        let mut reader = entry.into_reader(libpna::ReadOption::with_password::<String>(None))?;
+        let mut reader = entry.reader(libpna::ReadOption::with_password::<String>(None))?;
         io::copy(&mut reader, &mut writer)?;
     }
     Ok(())
