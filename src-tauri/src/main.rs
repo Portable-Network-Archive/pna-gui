@@ -14,7 +14,7 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command(async)]
-fn extract(window: Window, path: &str) -> Result<(), tauri::Error> {
+fn extract(window: Window, path: &str) -> tauri::Result<()> {
     Ok(_extract(window, path)?)
 }
 
