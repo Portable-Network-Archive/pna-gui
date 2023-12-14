@@ -1,7 +1,22 @@
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
+.row.tab {
+  justify-content: space-around;
 }
 
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafb);
+.tab .item {
+  font-weight: bold;
+  width: 100%;
+}
+.tab .item.inactive {
+  background-color: #ffffff;
+  opacity: 0.5;
+}
+.tab .item.inactive:hover {
+  text-shadow: #747bff 1px 0 10px;
+  opacity: 1;
+}
+@media (prefers-color-scheme: dark) {
+  .tab .item.inactive {
+    background-color: #2f2f2f;
+    opacity: 0.5;
+  }
 }
