@@ -3,14 +3,21 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 
 export default function Create() {
-  const [name, setName] = useState("");
+  const [files, setFiles] = useState<string[]>([]);
+  const [name, setName] = useState("archive.pna");
   const [processing, setProcessing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const extract = (path: string) => {
+  const addFiles = (paths:string[]) => {
+    setFiles((current) => {
+      return [...current, ...paths];
+    })
+  }
+
+  const create = () => {
     setProcessing(true);
     // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-    invoke("extract", { path })
+    invoke("create", { name, files })
       .then(() => {
         setProcessing(false);
       })
@@ -25,9 +32,7 @@ export default function Create() {
       if (e.payload.type !== "drop") {
         return;
       }
-      for (const path of e.payload.paths) {
-        extract(path);
-      }
+      addFiles(e.payload.paths);
     });
     return () => {
       unlisten.then((it) => it());
@@ -35,7 +40,7 @@ export default function Create() {
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow.listen<string>("extract_processing", (e) => {
+    const unlisten = appWindow.listen<string>("create_processing", (e) => {
       setName(e.payload);
     });
     return () => {
@@ -46,27 +51,34 @@ export default function Create() {
   return (
     <div className="container">
       <div className="row">
-        <span onClick={() => inputRef.current?.click()}>
-          <img src="/pna.svg" className="logo vite" alt="PNA logo" />
-        </span>
+        <div className="container">
+          {files.map(it =>
+            <div key={it} className="row">
+              <span>{it}</span>
+            </div>
+            )}
+        </div>
       </div>
-      {processing && <div className="row">Extracting {name} ...</div>}
-
-      {!processing && (
-        <div className="row">
+      <div className="row">
           <h1>
-            <label htmlFor="extract_file">
-              <b>Drop here to extract PNA file.</b>
+            <label htmlFor="files">
+              <b>Drop here to add to PNA file.</b>
             </label>
             <input
               ref={inputRef}
-              id="extract_file"
+              id="files"
               className="hidden"
               type="file"
+              onChange={e => {
+              const files = e.target.files;
+              files && addFiles(Array.from(files).map(it => it.webkitRelativePath))
+            }}
             />
           </h1>
         </div>
-      )}
+      <div className="row">
+        <button onClick={() => create()}>Create</button>
+      </div>
     </div>
   );
 }

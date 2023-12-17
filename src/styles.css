@@ -1,3 +1,12 @@
+html, body {
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+#root {
+  height: calc(100vh - 16px);
+  margin: 8px;
+}
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -15,6 +24,7 @@
 }
 
 .container {
+  height: 100%;
   margin: 0;
   display: flex;
   flex-direction: column;
