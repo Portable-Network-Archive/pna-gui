@@ -44,9 +44,12 @@ export default function Extract() {
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow.listen<string>(EVENT_ON_START_PROCESS_ENTRY, (e) => {
-      setName(e.payload);
-    });
+    const unlisten = appWindow.listen<string>(
+      EVENT_ON_START_PROCESS_ENTRY,
+      (e) => {
+        setName(e.payload);
+      },
+    );
     return () => {
       unlisten.then((it) => it());
     };
