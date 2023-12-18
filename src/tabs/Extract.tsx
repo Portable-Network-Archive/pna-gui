@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
+const EVENT_ON_START_PROCESS_ENTRY = "extract_processing";
 
 export default function Extract() {
   const [name, setName] = useState("");
@@ -43,7 +44,7 @@ export default function Extract() {
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow.listen<string>("extract_processing", (e) => {
+    const unlisten = appWindow.listen<string>(EVENT_ON_START_PROCESS_ENTRY, (e) => {
       setName(e.payload);
     });
     return () => {

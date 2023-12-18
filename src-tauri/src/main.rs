@@ -9,7 +9,7 @@ use tauri::{api::dialog::FileDialogBuilder, CustomMenuItem, Menu, MenuEntry, Win
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
-fn open_pna_file_picker(window: Window, event:String) {
+fn open_pna_file_picker(window: Window, event: String) {
     FileDialogBuilder::new()
         .add_filter("pna", &["pna"])
         .pick_file(move |path| {
@@ -20,14 +20,23 @@ fn open_pna_file_picker(window: Window, event:String) {
 }
 
 #[tauri::command]
+fn open_files_picker(window: Window, event: String) {
+    FileDialogBuilder::new().pick_files(move |paths| {
+        if let Some(p) = paths {
+            window.emit(&event, p).unwrap();
+        };
+    })
+}
+
+#[tauri::command]
 fn create(window: Window, name: &str, files: Vec<&str>) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
 #[tauri::command(async)]
-fn extract(window: Window, path: &str) -> tauri::Result<()> {
+fn extract(window: Window, event: String, path: &str) -> tauri::Result<()> {
     Ok(_extract(path, |name| {
-        let _ = window.emit("extract_processing", name);
+        let _ = window.emit(&event, name);
     })?)
 }
 
@@ -93,7 +102,12 @@ fn main() {
                 m => println!("{}", m),
             };
         })
-        .invoke_handler(tauri::generate_handler![create, extract, open_pna_file_picker])
+        .invoke_handler(tauri::generate_handler![
+            create,
+            extract,
+            open_pna_file_picker,
+            open_files_picker
+        ])
         .run(context)
         .expect("error while running tauri application");
 }
