@@ -5,9 +5,20 @@ use std::{fs, io, path::Path};
 
 #[cfg(not(target_os = "macos"))]
 use tauri::Submenu;
-use tauri::{CustomMenuItem, Menu, MenuEntry, Window};
+use tauri::{api::dialog::FileDialogBuilder, CustomMenuItem, Menu, MenuEntry, Window};
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
+#[tauri::command]
+fn open_pna_file_picker(window: Window, event:String) {
+    FileDialogBuilder::new()
+        .add_filter("pna", &["pna"])
+        .pick_file(move |path| {
+            if let Some(p) = path {
+                window.emit(&event, p).unwrap();
+            };
+        });
+}
+
 #[tauri::command]
 fn create(window: Window, name: &str, files: Vec<&str>) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -82,7 +93,7 @@ fn main() {
                 m => println!("{}", m),
             };
         })
-        .invoke_handler(tauri::generate_handler![create, extract])
+        .invoke_handler(tauri::generate_handler![create, extract, open_pna_file_picker])
         .run(context)
         .expect("error while running tauri application");
 }

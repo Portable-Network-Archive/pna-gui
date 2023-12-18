@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
+
+const EVENT_ON_FILE_PICKED = "on_file_picked";
 
 export default function Extract() {
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const extract = (path: string) => {
     setProcessing(true);
@@ -18,6 +19,13 @@ export default function Extract() {
         window.alert(err);
         setProcessing(false);
       });
+  };
+
+  const openFilePicker = () => {
+    if (processing) {
+      return;
+    }
+    invoke("open_file_picker", { event: EVENT_ON_FILE_PICKED });
   };
 
   useEffect(() => {
@@ -43,10 +51,19 @@ export default function Extract() {
     };
   }, []);
 
+  useEffect(() => {
+    const unlisten = appWindow.listen<string>(EVENT_ON_FILE_PICKED, (e) => {
+      extract(e.payload);
+    });
+    return () => {
+      unlisten.then((it) => it());
+    };
+  }, []);
+
   return (
     <div className="container">
       <div className="row">
-        <span onClick={() => inputRef.current?.click()}>
+        <span onClick={() => openFilePicker()}>
           <img src="/pna.svg" className="logo vite" alt="PNA logo" />
         </span>
       </div>
@@ -55,16 +72,9 @@ export default function Extract() {
       {!processing && (
         <div className="row">
           <h1>
-            <label htmlFor="extract_file">
+            <span onClick={() => openFilePicker()}>
               <b>Drop here to extract PNA file.</b>
-            </label>
-            <input
-              ref={inputRef}
-              id="extract_file"
-              className="hidden"
-              type="file"
-              accept=".pna"
-            />
+            </span>
           </h1>
         </div>
       )}

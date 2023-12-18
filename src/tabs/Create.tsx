@@ -8,11 +8,11 @@ export default function Create() {
   const [processing, setProcessing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const addFiles = (paths:string[]) => {
+  const addFiles = (paths: string[]) => {
     setFiles((current) => {
       return [...current, ...paths];
-    })
-  }
+    });
+  };
 
   const create = () => {
     setProcessing(true);
@@ -52,30 +52,31 @@ export default function Create() {
     <div className="container">
       <div className="row">
         <div className="container">
-          {files.map(it =>
+          {files.map((it) => (
             <div key={it} className="row">
               <span>{it}</span>
             </div>
-            )}
+          ))}
         </div>
       </div>
       <div className="row">
-          <h1>
-            <label htmlFor="files">
-              <b>Drop here to add to PNA file.</b>
-            </label>
-            <input
-              ref={inputRef}
-              id="files"
-              className="hidden"
-              type="file"
-              onChange={e => {
+        <h1>
+          <label htmlFor="files">
+            <b>Drop here to add to PNA file.</b>
+          </label>
+          <input
+            ref={inputRef}
+            id="files"
+            className="hidden"
+            type="file"
+            onChange={(e) => {
               const files = e.target.files;
-              files && addFiles(Array.from(files).map(it => it.webkitRelativePath))
+              files &&
+                addFiles(Array.from(files).map((it) => it.webkitRelativePath));
             }}
-            />
-          </h1>
-        </div>
+          />
+        </h1>
+      </div>
       <div className="row">
         <button onClick={() => create()}>Create</button>
       </div>
