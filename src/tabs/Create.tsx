@@ -68,20 +68,20 @@ export default function Create() {
   return (
     <div className="container">
       <div className="row">
-        <div className="container">
-          {files.map((it) => (
-            <div key={it} className="row">
-              <span>{it}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="row">
         <h1>
           <span onClick={() => openFilePicker()}>
             <b>Drop here to add to PNA file.</b>
           </span>
         </h1>
+      </div>
+      <div className="row">
+        <ul className="file_list">
+          {files.map((it) => (
+            <li key={it} className="file_item">
+              <span>{it}</span>
+            </li>
+          ))}
+        </ul>
       </div>
       <div className="row">
         <button onClick={() => create()}>Create</button>
