@@ -75,6 +75,7 @@ h1 {
   text-align: center;
 }
 
+select,
 input,
 button {
   border-radius: 8px;
@@ -101,36 +102,15 @@ button:active {
   background-color: #e8e8e8;
 }
 
+select,
 input,
 button {
   outline: none;
 }
 
-#greet-input {
-  margin-right: 5px;
-}
-
-.file_list {
-  list-style: none;
-  background-color: #0f0f0f98;
-  padding: 0.1em;
-  min-height: 9em;
-  max-height: 9em;
-  min-width: 30em;
-  width: calc(100% - 2em);
-  border-radius: 8px;
-  overflow: scroll;
-}
-
-.file_list > .file_item {
-  padding: 0 0.5em;
-  text-align: start;
-  overflow: scroll;
-}
-
-.file_list > .file_item:nth-child(2n) {
-  background-color: #282828;
-  border-radius: 4px;
+.clickable:hover {
+  text-shadow: #747bff 1px 0 10px;
+  opacity: 1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -143,6 +123,7 @@ button {
     color: #24c8db;
   }
 
+  select,
   input,
   button {
     color: #ffffff;

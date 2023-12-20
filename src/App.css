@@ -20,3 +20,26 @@
     opacity: 0.5;
   }
 }
+
+.file_list {
+  list-style: none;
+  background-color: #0f0f0f98;
+  padding: 0.1em;
+  min-height: 9em;
+  max-height: 9em;
+  min-width: 30em;
+  width: calc(100% - 2em);
+  border-radius: 8px;
+  overflow: scroll;
+}
+
+.file_list > .file_item {
+  padding: 0 0.5em;
+  text-align: start;
+  overflow: scroll;
+}
+
+.file_list > .file_item:nth-child(2n) {
+  background-color: #282828;
+  border-radius: 4px;
+}

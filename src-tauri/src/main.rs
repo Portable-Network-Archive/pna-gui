@@ -13,18 +13,21 @@ fn open_pna_file_picker(window: Window, event: String) {
     FileDialogBuilder::new()
         .add_filter("pna", &["pna"])
         .pick_file(move |path| {
-            if let Some(p) = path {
-                window.emit(&event, p).unwrap();
-            };
+            path.and_then(|p| window.emit(&event, p).ok());
         });
 }
 
 #[tauri::command]
 fn open_files_picker(window: Window, event: String) {
     FileDialogBuilder::new().pick_files(move |paths| {
-        if let Some(p) = paths {
-            window.emit(&event, p).unwrap();
-        };
+        paths.and_then(|p| window.emit(&event, p).ok());
+    })
+}
+
+#[tauri::command]
+fn open_dir_picker(window: Window, event: String) {
+    FileDialogBuilder::new().pick_folder(move |path| {
+        path.and_then(|p| window.emit(&event, p).ok());
     })
 }
 
@@ -106,7 +109,8 @@ fn main() {
             create,
             extract,
             open_pna_file_picker,
-            open_files_picker
+            open_files_picker,
+            open_dir_picker,
         ])
         .run(context)
         .expect("error while running tauri application");

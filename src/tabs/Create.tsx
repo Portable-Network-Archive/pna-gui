@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
+const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
 
 export default function Create() {
   const [files, setFiles] = useState<string[]>([]);
   const [name, setName] = useState("archive.pna");
   const [processing, setProcessing] = useState(false);
+  const [saveDir, setSaveDir] = useState<string | null>(null);
+  const saveDirRef = useRef<HTMLSelectElement>(null);
 
   const addFiles = (paths: string[]) => {
     setFiles((current) => {
@@ -22,10 +25,17 @@ export default function Create() {
     invoke("open_files_picker", { event: EVENT_ON_FILE_PICKED });
   };
 
+  const openDirPicker = () => {
+    if (processing) {
+      return;
+    }
+    invoke("open_dir_picker", { event: EVENT_ON_SAVE_DIR_PICKED });
+  };
+
   const create = () => {
     setProcessing(true);
     // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-    invoke("create", { name, files })
+    invoke("create", { name: "archive.pna", files })
       .then(() => {
         setProcessing(false);
       })
@@ -65,12 +75,29 @@ export default function Create() {
     };
   }, []);
 
+  useEffect(() => {
+    const unlisten = appWindow.listen<string>(EVENT_ON_SAVE_DIR_PICKED, (e) => {
+      setSaveDir(e.payload);
+      const current = saveDirRef.current;
+      if (current === null) {
+        return;
+      }
+      for (let index = 0; index < current.options.length; index++) {
+        current.options[index].selected =
+          current.options[index].value === e.payload;
+      }
+    });
+    return () => {
+      unlisten.then((it) => it());
+    };
+  }, []);
+
   return (
     <div className="container">
       <div className="row">
         <h1>
-          <span onClick={() => openFilePicker()}>
-            <b>Drop here to add to PNA file.</b>
+          <span className="clickable" onClick={() => openFilePicker()}>
+            <b>Drop here to add to Archive</b>
           </span>
         </h1>
       </div>
@@ -84,6 +111,32 @@ export default function Create() {
         </ul>
       </div>
       <div className="row">
+        <span>
+          <label htmlFor="save">Save to</label>
+          <select
+            ref={saveDirRef}
+            id="save"
+            onChange={() => {
+              const selected = saveDirRef.current?.selectedOptions;
+              if (selected === undefined || selected.length === 0) {
+                return;
+              }
+              if (selected.item(0)?.value === "other") {
+                openDirPicker();
+              }
+            }}
+          >
+            {saveDir && (
+              <option value={saveDir} selected>
+                {saveDir}
+              </option>
+            )}
+            {saveDir && <hr></hr>}
+            <option value="desktop">Desktop</option>
+            <hr></hr>
+            <option value="other">Other</option>
+          </select>
+        </span>
         <button onClick={() => create()}>Create</button>
       </div>
     </div>

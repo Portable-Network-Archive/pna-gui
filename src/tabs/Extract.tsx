@@ -76,8 +76,8 @@ export default function Extract() {
       {!processing && (
         <div className="row">
           <h1>
-            <span onClick={() => openFilePicker()}>
-              <b>Drop here to extract PNA file.</b>
+            <span className="clickable" onClick={() => openFilePicker()}>
+              <b>Drop here to extract Archive</b>
             </span>
           </h1>
         </div>
