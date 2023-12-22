@@ -3,6 +3,7 @@
 
 use std::{fs, io, path::Path};
 
+use libpna::{Archive, EntryBuilder, WriteOption};
 #[cfg(not(target_os = "macos"))]
 use tauri::Submenu;
 use tauri::{api::dialog::FileDialogBuilder, CustomMenuItem, Menu, MenuEntry, Window};
@@ -32,22 +33,56 @@ fn open_dir_picker(window: Window, event: String) {
 }
 
 #[tauri::command]
-fn create(window: Window, name: &str, files: Vec<&str>) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+fn create(
+    window: Window,
+    event: String,
+    name: &str,
+    files: Vec<&str>,
+    save_dir: &str,
+) -> tauri::Result<()> {
+    Ok(_create(name, files, save_dir.as_ref(), |path| {
+        let _ = window.emit(&event, path);
+    })?)
 }
 
 #[tauri::command(async)]
 fn extract(window: Window, event: String, path: &str) -> tauri::Result<()> {
-    Ok(_extract(path, |name| {
+    Ok(_extract(path.as_ref(), |name| {
         let _ = window.emit(&event, name);
     })?)
 }
 
-fn _extract<OnStart>(path: &str, on_start_extract_entry: OnStart) -> io::Result<()>
+fn _create<OnFinish>(
+    name: &str,
+    files: Vec<&str>,
+    save_dir: &Path,
+    on_finish_create_archive: OnFinish,
+) -> io::Result<()>
+where
+    OnFinish: Fn(&Path),
+{
+    fs::create_dir_all(save_dir)?;
+    let archive_file_path = save_dir.join(name);
+    let archive_file = fs::File::create(&archive_file_path)?;
+    let mut archive = Archive::write_header(archive_file)?;
+    for file in files {
+        let mut f = fs::File::open(file)?;
+        let option = WriteOption::builder()
+            .compression(libpna::Compression::ZStandard)
+            .build();
+        let mut entry = EntryBuilder::new_file(file.try_into().map_err(io::Error::other)?, option)?;
+        io::copy(&mut f, &mut entry)?;
+        archive.add_entry(entry.build()?)?;
+    }
+    archive.finalize()?;
+    on_finish_create_archive(&archive_file_path);
+    Ok(())
+}
+
+fn _extract<OnStart>(path: &Path, on_start_extract_entry: OnStart) -> io::Result<()>
 where
     OnStart: Fn(&Path),
 {
-    let path: &Path = path.as_ref();
     let file_name: &Path = path.file_stem().unwrap_or("pna".as_ref()).as_ref();
     let dir = if let Some(parent) = path.parent() {
         parent.join(file_name)

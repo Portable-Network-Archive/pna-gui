@@ -4,10 +4,11 @@ import { appWindow } from "@tauri-apps/api/window";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
+const EVENT_ON_FINISH = "on_finish";
 
 export default function Create() {
   const [files, setFiles] = useState<string[]>([]);
-  const [name, setName] = useState("archive.pna");
+  const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
   const [saveDir, setSaveDir] = useState<string | null>(null);
   const saveDirRef = useRef<HTMLSelectElement>(null);
@@ -35,7 +36,12 @@ export default function Create() {
   const create = () => {
     setProcessing(true);
     // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-    invoke("create", { name: "archive.pna", files })
+    invoke("create", {
+      event: EVENT_ON_FINISH,
+      name: "archive.pna",
+      files,
+      save_dir: saveDir,
+    })
       .then(() => {
         setProcessing(false);
       })
@@ -86,6 +92,15 @@ export default function Create() {
         current.options[index].selected =
           current.options[index].value === e.payload;
       }
+    });
+    return () => {
+      unlisten.then((it) => it());
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlisten = appWindow.listen<string>(EVENT_ON_FINISH, (e) => {
+      setFiles([]);
     });
     return () => {
       unlisten.then((it) => it());
