@@ -5,6 +5,10 @@ import { appWindow } from "@tauri-apps/api/window";
 const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
 const EVENT_ON_FINISH = "on_finish";
+const EVENT_ON_ENTRY_START = "on_entry_start";
+
+const VALUE_OTHER = "other";
+const VALUE_DESKTOP = "desktop";
 
 export default function Create() {
   const [files, setFiles] = useState<string[]>([]);
@@ -33,14 +37,25 @@ export default function Create() {
     invoke("open_dir_picker", { event: EVENT_ON_SAVE_DIR_PICKED });
   };
 
+  const onSelectSaveDir = () => {
+    const selected = saveDirRef.current?.selectedOptions;
+    if (selected === undefined || selected.length === 0) {
+      return;
+    }
+    if (selected.item(0)?.value === VALUE_OTHER) {
+      openDirPicker();
+    }
+  };
+
   const create = () => {
     setProcessing(true);
     // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
     invoke("create", {
-      event: EVENT_ON_FINISH,
+      archiveFinishEvent: EVENT_ON_FINISH,
+      entryStartEvent: EVENT_ON_ENTRY_START,
       name: "archive.pna",
       files,
-      save_dir: saveDir,
+      saveDir,
     })
       .then(() => {
         setProcessing(false);
@@ -64,7 +79,7 @@ export default function Create() {
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow.listen<string>("create_processing", (e) => {
+    const unlisten = appWindow.listen<string>(EVENT_ON_ENTRY_START, (e) => {
       setName(e.payload);
     });
     return () => {
@@ -99,7 +114,7 @@ export default function Create() {
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow.listen<string>(EVENT_ON_FINISH, (e) => {
+    const unlisten = appWindow.listen<string>(EVENT_ON_FINISH, () => {
       setFiles([]);
     });
     return () => {
@@ -121,6 +136,7 @@ export default function Create() {
           {files.map((it) => (
             <li key={it} className="file_item">
               <span>{it}</span>
+              {processing && it == name && <span>processing</span>}
             </li>
           ))}
         </ul>
@@ -128,28 +144,16 @@ export default function Create() {
       <div className="row">
         <span>
           <label htmlFor="save">Save to</label>
-          <select
-            ref={saveDirRef}
-            id="save"
-            onChange={() => {
-              const selected = saveDirRef.current?.selectedOptions;
-              if (selected === undefined || selected.length === 0) {
-                return;
-              }
-              if (selected.item(0)?.value === "other") {
-                openDirPicker();
-              }
-            }}
-          >
+          <select ref={saveDirRef} id="save" onChange={onSelectSaveDir}>
             {saveDir && (
               <option value={saveDir} selected>
                 {saveDir}
               </option>
             )}
             {saveDir && <hr></hr>}
-            <option value="desktop">Desktop</option>
+            <option value={VALUE_DESKTOP}>Desktop</option>
             <hr></hr>
-            <option value="other">Other</option>
+            <option value={VALUE_OTHER}>Other</option>
           </select>
         </span>
         <button onClick={() => create()}>Create</button>

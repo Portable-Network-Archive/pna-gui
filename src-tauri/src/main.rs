@@ -35,14 +35,27 @@ fn open_dir_picker(window: Window, event: String) {
 #[tauri::command]
 fn create(
     window: Window,
-    event: String,
+    archive_finish_event: String,
+    entry_start_event: String,
     name: &str,
     files: Vec<&str>,
     save_dir: &str,
 ) -> tauri::Result<()> {
-    Ok(_create(name, files, save_dir.as_ref(), |path| {
-        let _ = window.emit(&event, path);
-    })?)
+    Ok(_create(
+        name,
+        files,
+        save_dir.as_ref(),
+        |e, path| {
+            match e {
+                Event::Start => (),
+                Event::Finish => window.emit(&archive_finish_event, path).unwrap(),
+            };
+        },
+        |e, path| match e {
+            Event::Start => window.emit(&entry_start_event, path).unwrap(),
+            Event::Finish => (),
+        },
+    )?)
 }
 
 #[tauri::command(async)]
@@ -52,17 +65,25 @@ fn extract(window: Window, event: String, path: &str) -> tauri::Result<()> {
     })?)
 }
 
-fn _create<OnFinish>(
+enum Event {
+    Start,
+    Finish,
+}
+
+fn _create<OnChangeArchive, OnChangeEntry>(
     name: &str,
     files: Vec<&str>,
     save_dir: &Path,
-    on_finish_create_archive: OnFinish,
+    on_change_archive: OnChangeArchive,
+    on_change_entry: OnChangeEntry,
 ) -> io::Result<()>
 where
-    OnFinish: Fn(&Path),
+    OnChangeArchive: Fn(Event, &Path),
+    OnChangeEntry: Fn(Event, &Path),
 {
     fs::create_dir_all(save_dir)?;
     let archive_file_path = save_dir.join(name);
+    on_change_archive(Event::Start, &archive_file_path);
     let archive_file = fs::File::create(&archive_file_path)?;
     let mut archive = Archive::write_header(archive_file)?;
     for file in files {
@@ -75,7 +96,7 @@ where
         archive.add_entry(entry.build()?)?;
     }
     archive.finalize()?;
-    on_finish_create_archive(&archive_file_path);
+    on_change_archive(Event::Finish, &archive_file_path);
     Ok(())
 }
 
