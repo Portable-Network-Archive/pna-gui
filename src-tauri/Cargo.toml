@@ -1,6 +1,6 @@
 [package]
 name = "pna-gui"
-version = "0.0.3"
+version = "0.0.4"
 description = "A Tauri App"
 authors = ["Portable-Network-Archive Developers"]
 license = "MIT"
@@ -17,6 +17,7 @@ tauri = { version = "1.5", features = [ "path-all", "updater", "window-all", "di
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 libpna = "0.5.0"
+open = "5.0.1"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

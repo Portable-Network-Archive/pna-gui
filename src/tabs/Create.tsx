@@ -58,7 +58,7 @@ export default function Create() {
       entryStartEvent: EVENT_ON_ENTRY_START,
       name: "archive.pna",
       files,
-      saveDir: saveDir || await desktopDir(),
+      saveDir: saveDir || (await desktopDir()),
     })
       .then(() => {
         setProcessing(false);
