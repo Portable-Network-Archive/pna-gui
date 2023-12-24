@@ -12,7 +12,7 @@ export default function Extract() {
   const extract = (path: string) => {
     setProcessing(true);
     // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-    invoke("extract", { path })
+    invoke("extract", { path, event: EVENT_ON_START_PROCESS_ENTRY })
       .then(() => {
         setProcessing(false);
       })
