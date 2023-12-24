@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
+import { desktopDir } from "@tauri-apps/api/path";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
@@ -44,10 +45,12 @@ export default function Create() {
     }
     if (selected.item(0)?.value === VALUE_OTHER) {
       openDirPicker();
+    } else {
+      setSaveDir(null);
     }
   };
 
-  const create = () => {
+  const create = async () => {
     setProcessing(true);
     // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
     invoke("create", {
@@ -55,7 +58,7 @@ export default function Create() {
       entryStartEvent: EVENT_ON_ENTRY_START,
       name: "archive.pna",
       files,
-      saveDir,
+      saveDir: saveDir || await desktopDir(),
     })
       .then(() => {
         setProcessing(false);
@@ -156,7 +159,7 @@ export default function Create() {
             <option value={VALUE_OTHER}>Other</option>
           </select>
         </span>
-        <button onClick={() => create()}>Create</button>
+        <button onClick={create}>Create</button>
       </div>
     </div>
   );
