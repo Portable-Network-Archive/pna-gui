@@ -1,7 +1,10 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use libpna::{Archive, EntryBuilder, WriteOption};
 #[cfg(not(target_os = "macos"))]
@@ -39,12 +42,12 @@ fn create(
     entry_start_event: String,
     name: &str,
     files: Vec<&str>,
-    save_dir: &str,
+    save_dir: PathBuf,
 ) -> tauri::Result<()> {
     Ok(_create(
         name,
         files,
-        save_dir.as_ref(),
+        &save_dir,
         |e, path| {
             match e {
                 Event::Start => (),
@@ -53,16 +56,24 @@ fn create(
         },
         |e, path| match e {
             Event::Start => window.emit(&entry_start_event, path).unwrap(),
-            Event::Finish => (),
+            Event::Finish => open::that(&save_dir).unwrap(),
         },
     )?)
 }
 
 #[tauri::command(async)]
 fn extract(window: Window, event: String, path: &str) -> tauri::Result<()> {
-    Ok(_extract(path.as_ref(), |name| {
-        let _ = window.emit(&event, name);
-    })?)
+    Ok(_extract(
+        path.as_ref(),
+        |e, name| match e {
+            Event::Start => (),
+            Event::Finish => open::that(name).unwrap(),
+        },
+        |e, name| match e {
+            Event::Start => window.emit(&event, name).unwrap(),
+            Event::Finish => (),
+        },
+    )?)
 }
 
 enum Event {
@@ -102,16 +113,22 @@ where
     Ok(())
 }
 
-fn _extract<OnStart>(path: &Path, on_start_extract_entry: OnStart) -> io::Result<()>
+fn _extract<OnChangeArchive, OnChangeEntry>(
+    path: &Path,
+    on_change_archive: OnChangeArchive,
+    on_change_entry: OnChangeEntry,
+) -> io::Result<()>
 where
-    OnStart: Fn(&Path),
+    OnChangeEntry: Fn(Event, &Path),
+    OnChangeArchive: Fn(Event, &Path),
 {
     let file_name: &Path = path.file_stem().unwrap_or("pna".as_ref()).as_ref();
-    let dir = if let Some(parent) = path.parent() {
+    let out_dir = if let Some(parent) = path.parent() {
         parent.join(file_name)
     } else {
         file_name.to_owned()
     };
+    on_change_archive(Event::Start, &out_dir);
     let file = fs::File::open(path)?;
     let mut archive = libpna::Archive::read_header(file)?;
     for entry in archive.entries() {
@@ -120,15 +137,17 @@ where
             continue;
         }
         let name = entry.header().path().as_path();
-        on_start_extract_entry(name);
-        let name = dir.join(name);
-        if let Some(parent) = name.parent() {
+        on_change_entry(Event::Start, name);
+        let out_path = out_dir.join(name);
+        if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut writer = fs::File::create(name)?;
+        let mut writer = fs::File::create(out_path)?;
         let mut reader = entry.reader(libpna::ReadOption::with_password::<String>(None))?;
         io::copy(&mut reader, &mut writer)?;
+        on_change_entry(Event::Finish, name);
     }
+    on_change_archive(Event::Finish, &out_dir);
     Ok(())
 }
 
