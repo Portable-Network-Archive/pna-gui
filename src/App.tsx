@@ -1,75 +1,30 @@
-import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
-import { appWindow } from "@tauri-apps/api/window";
+import { useState } from "react";
+import { Extract, Create } from "./tabs";
 import "./App.css";
 
+type Mode = "extract" | "create";
+
 function App() {
-  const [name, setName] = useState("");
-  const [processing, setProcessing] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const extract = (path: string) => {
-    setProcessing(true);
-    // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-    invoke("extract", { path })
-      .then(() => {
-        setProcessing(false);
-      })
-      .catch((err) => {
-        window.alert(err);
-        setProcessing(false);
-      });
-  };
-
-  useEffect(() => {
-    const unlisten = appWindow.onFileDropEvent((e) => {
-      if (e.payload.type !== "drop") {
-        return;
-      }
-      for (const path of e.payload.paths) {
-        extract(path);
-      }
-    });
-    return () => {
-      unlisten.then((it) => it());
-    };
-  }, []);
-
-  useEffect(() => {
-    const unlisten = appWindow.listen<string>("extract_processing", (e) => {
-      setName(e.payload);
-    });
-    return () => {
-      unlisten.then((it) => it());
-    };
-  }, []);
+  const [mode, setMode] = useState<Mode>("extract");
 
   return (
     <div className="container">
-      <div className="row">
-        <span>
-          <img src="/pna.svg" className="logo vite" alt="PNA logo" />
+      <div className="row tab">
+        <span
+          className={"item " + (mode === "extract" ? "" : "inactive")}
+          onClick={() => setMode("extract")}
+        >
+          Extract
+        </span>
+        <span
+          className={"item " + (mode === "create" ? "" : "inactive")}
+          onClick={() => setMode("create")}
+        >
+          Create
         </span>
       </div>
-
-      {processing && <div className="row">Extracting {name} ...</div>}
-
-      {!processing && (
-        <div className="row">
-          <h1>
-            <label htmlFor="extract_file">
-              <b>Drop here to extract PNA file.</b>
-            </label>
-            <input
-              ref={inputRef}
-              id="extract_file"
-              className="hidden"
-              type="file"
-              accept=".pna"
-            />
-          </h1>
-        </div>
-      )}
+      {mode === "extract" && <Extract />}
+      {mode === "create" && <Create />}
     </div>
   );
 }
