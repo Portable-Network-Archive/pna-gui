@@ -87,6 +87,7 @@ where
     let archive_file = fs::File::create(&archive_file_path)?;
     let mut archive = Archive::write_header(archive_file)?;
     for file in files {
+        on_change_entry(Event::Start, file.as_ref());
         let mut f = fs::File::open(file)?;
         let option = WriteOption::builder()
             .compression(libpna::Compression::ZStandard)
@@ -94,6 +95,7 @@ where
         let mut entry = EntryBuilder::new_file(file.try_into().map_err(io::Error::other)?, option)?;
         io::copy(&mut f, &mut entry)?;
         archive.add_entry(entry.build()?)?;
+        on_change_entry(Event::Finish, file.as_ref());
     }
     archive.finalize()?;
     on_change_archive(Event::Finish, &archive_file_path);
