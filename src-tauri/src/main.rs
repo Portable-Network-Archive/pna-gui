@@ -154,31 +154,31 @@ where
 }
 
 const MENU_UPDATE_CHECK: &str = "update check";
-const MENU_EXTRACT_FILE: &str = "extract file";
+const MENU_EXTRACT_TAB: &str = "extract tab";
+const MENU_CREATE_TAB: &str = "create tab";
 
 fn main() {
     let context = tauri::generate_context!();
     let mut menu = Menu::os_default(&context.package_info().name);
     let update_check = CustomMenuItem::new(MENU_UPDATE_CHECK, "Check for updates...");
-    let extract_file = CustomMenuItem::new(MENU_EXTRACT_FILE, "Extract");
+    let extract_tab = CustomMenuItem::new(MENU_EXTRACT_TAB, "Extract");
+    let create_tab = CustomMenuItem::new(MENU_CREATE_TAB, "Create");
     #[cfg(target_os = "macos")]
     if let MenuEntry::Submenu(sub_menu) = &mut menu.items[0] {
-        sub_menu
-            .inner
-            .items
-            .insert(1, MenuEntry::CustomItem(update_check));
+        let items = &mut sub_menu.inner.items;
+        items.insert(1, MenuEntry::CustomItem(update_check));
     }
     #[cfg(target_os = "macos")]
-    if let MenuEntry::Submenu(sub_menu) = &mut menu.items[1] {
-        sub_menu
-            .inner
-            .items
-            .insert(0, MenuEntry::CustomItem(extract_file.accelerator("Cmd+O")));
+    if let MenuEntry::Submenu(sub_menu) = &mut menu.items[3] {
+        let items = &mut sub_menu.inner.items;
+        items.insert(0, MenuEntry::CustomItem(extract_tab.accelerator("Cmd+1")));
+        items.insert(1, MenuEntry::CustomItem(create_tab.accelerator("Cmd+2")));
     }
     #[cfg(not(target_os = "macos"))]
     {
         menu = menu.add_submenu(Submenu::new("Tools", Menu::new().add_item(update_check)));
-        menu = menu.add_item(extract_file.accelerator("Ctrl+O"));
+        menu = menu.add_item(extract_tab.accelerator("Ctrl+1"));
+        menu = menu.add_item(create_tab.accelerator("Ctrl+2"));
     }
 
     tauri::Builder::default()
@@ -191,8 +191,11 @@ fn main() {
                         .emit_and_trigger("tauri://update", ())
                         .unwrap();
                 }
-                MENU_EXTRACT_FILE => {
-                    event.window().emit("open_extract", ()).unwrap();
+                MENU_EXTRACT_TAB => {
+                    event.window().emit("switch_tab", "extract").unwrap();
+                }
+                MENU_CREATE_TAB => {
+                    event.window().emit("switch_tab", "create").unwrap();
                 }
                 m => println!("{}", m),
             };

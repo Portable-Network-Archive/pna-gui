@@ -8,11 +8,12 @@ type Mode = "extract" | "create";
 function App() {
   const [mode, setMode] = useState<Mode>("extract");
   useEffect(() => {
-    const unlisten = appWindow.listen<void>("open_extract", () => {
+    const unlisten = appWindow.listen<Mode>("switch_tab", (e) => {
+      setMode(e.payload);
     });
     return () => {
       unlisten.then((it) => it());
-    };  
+    };
   }, []);
 
   return (
