@@ -13,7 +13,6 @@ body {
 }
 #root {
   height: calc(100vh - 16px);
-  margin: 8px;
 }
 :root {
   --base-color: #f6f6f6;
