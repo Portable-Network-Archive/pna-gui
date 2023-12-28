@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 import { desktopDir } from "@tauri-apps/api/path";
+import { readAllIfDir } from "../utils/fs";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
@@ -18,9 +19,13 @@ export default function Create() {
   const [saveDir, setSaveDir] = useState<string | null>(null);
   const saveDirRef = useRef<HTMLSelectElement>(null);
 
-  const addFiles = (paths: string[]) => {
+  const addFiles = async (paths: string[]) => {
+    let files: string[] = [];
+    for (const path of paths) {
+      files.push(...(await readAllIfDir(path)));
+    }
     setFiles((current) => {
-      return [...current, ...paths];
+      return [...current, ...files];
     });
   };
 
