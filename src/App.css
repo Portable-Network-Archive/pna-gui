@@ -31,7 +31,7 @@
 .file_list > .file_item {
   padding: 0 0.5em;
   text-align: start;
-  overflow: scroll;
+  white-space: nowrap;
 }
 
 .file_list > .file_item:nth-child(2n) {
