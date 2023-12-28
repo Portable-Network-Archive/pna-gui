@@ -5,25 +5,20 @@
 .tab .item {
   font-weight: bold;
   width: 100%;
+  border-radius: 8px 8px 0 0;
+  border-top: 1px solid var(--primary-color);
 }
 .tab .item.inactive {
-  background-color: #ffffff;
+  background-color: var(--base-color-dark);
   opacity: 0.5;
 }
 .tab .item.inactive:hover {
   text-shadow: #747bff 1px 0 10px;
   opacity: 1;
 }
-@media (prefers-color-scheme: dark) {
-  .tab .item.inactive {
-    background-color: #2f2f2f;
-    opacity: 0.5;
-  }
-}
-
 .file_list {
   list-style: none;
-  background-color: #0f0f0f98;
+  background-color: var(--base-color-dark);
   padding: 0.1em;
   min-height: 9em;
   max-height: 9em;
@@ -40,6 +35,6 @@
 }
 
 .file_list > .file_item:nth-child(2n) {
-  background-color: #282828;
+  background-color: var(--base-color-light);
   border-radius: 4px;
 }
