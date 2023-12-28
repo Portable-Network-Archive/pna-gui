@@ -53,12 +53,15 @@ fn create(
         |e, path| {
             match e {
                 Event::Start => (),
-                Event::Finish => window.emit(&archive_finish_event, path).unwrap(),
+                Event::Finish => {
+                    window.emit(&archive_finish_event, path).unwrap();
+                    open::that(&save_dir).unwrap();
+                }
             };
         },
         |e, path| match e {
             Event::Start => window.emit(&entry_start_event, path).unwrap(),
-            Event::Finish => open::that(&save_dir).unwrap(),
+            Event::Finish => (),
         },
     )?)
 }
