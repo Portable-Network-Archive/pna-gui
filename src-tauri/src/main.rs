@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use libpna::{Archive, EntryBuilder, WriteOption};
+use libpna::{Archive, EntryBuilder, EntryName, WriteOption};
 #[cfg(target_os = "macos")]
 use tauri::MenuEntry;
 #[cfg(not(target_os = "macos"))]
@@ -105,7 +105,7 @@ where
         let option = WriteOption::builder()
             .compression(libpna::Compression::ZStandard)
             .build();
-        let mut entry = EntryBuilder::new_file(file.try_into().map_err(io::Error::other)?, option)?;
+        let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), option)?;
         io::copy(&mut f, &mut entry)?;
         archive.add_entry(entry.build()?)?;
         on_change_entry(Event::Finish, file.as_ref());
