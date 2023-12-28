@@ -37,13 +37,13 @@ fn open_dir_picker(window: Window, event: String) {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create(
     window: Window,
     archive_finish_event: String,
     entry_start_event: String,
     name: &str,
-    files: Vec<&str>,
+    files: Vec<PathBuf>,
     save_dir: PathBuf,
 ) -> tauri::Result<()> {
     Ok(_create(
@@ -85,7 +85,7 @@ enum Event {
 
 fn _create<OnChangeArchive, OnChangeEntry>(
     name: &str,
-    files: Vec<&str>,
+    files: Vec<PathBuf>,
     save_dir: &Path,
     on_change_archive: OnChangeArchive,
     on_change_entry: OnChangeEntry,
@@ -99,7 +99,7 @@ where
     on_change_archive(Event::Start, &archive_file_path);
     let archive_file = fs::File::create(&archive_file_path)?;
     let mut archive = Archive::write_header(archive_file)?;
-    for file in files {
+    for file in files.iter() {
         on_change_entry(Event::Start, file.as_ref());
         let mut f = fs::File::open(file)?;
         let option = WriteOption::builder()
