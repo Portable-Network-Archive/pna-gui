@@ -7,6 +7,7 @@ use std::{
 };
 
 use libpna::{Archive, EntryBuilder, EntryName, WriteOption};
+use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use tauri::MenuEntry;
 #[cfg(not(target_os = "macos"))]
@@ -45,11 +46,13 @@ fn create(
     name: &str,
     files: Vec<PathBuf>,
     save_dir: PathBuf,
+    option: PnaOption,
 ) -> tauri::Result<()> {
     Ok(_create(
         name,
         files,
         &save_dir,
+        option,
         |e, path| {
             match e {
                 Event::Start => (),
@@ -86,10 +89,39 @@ enum Event {
     Finish,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy)]
+enum Compression {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "zlib")]
+    Zlib,
+    #[serde(rename = "zstd")]
+    ZStandard,
+    #[serde(rename = "xz")]
+    XZ,
+}
+
+impl From<Compression> for libpna::Compression {
+    fn from(value: Compression) -> Self {
+        match value {
+            Compression::None => Self::No,
+            Compression::Zlib => Self::Deflate,
+            Compression::ZStandard => Self::ZStandard,
+            Compression::XZ => Self::XZ,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct PnaOption {
+    compression: Compression,
+}
+
 fn _create<OnChangeArchive, OnChangeEntry>(
     name: &str,
     files: Vec<PathBuf>,
     save_dir: &Path,
+    option: PnaOption,
     on_change_archive: OnChangeArchive,
     on_change_entry: OnChangeEntry,
 ) -> io::Result<()>
@@ -106,7 +138,7 @@ where
         on_change_entry(Event::Start, file.as_ref());
         let mut f = fs::File::open(file)?;
         let option = WriteOption::builder()
-            .compression(libpna::Compression::ZStandard)
+            .compression(option.compression.into())
             .build();
         let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), option)?;
         io::copy(&mut f, &mut entry)?;

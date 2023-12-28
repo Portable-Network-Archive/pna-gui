@@ -12,10 +12,14 @@ const EVENT_ON_ENTRY_START = "on_entry_start";
 const VALUE_OTHER = "other";
 const VALUE_DESKTOP = "desktop";
 
+const COMPRESSION = ["none", "zlib", "zstd", "xz"] as const;
+type Compression = (typeof COMPRESSION)[number];
+
 export default function Create() {
   const [files, setFiles] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
+  const [compression, setCompression] = useState<Compression>("zstd");
   const [saveDir, setSaveDir] = useState<string | null>(null);
   const saveDirRef = useRef<HTMLSelectElement>(null);
 
@@ -64,6 +68,9 @@ export default function Create() {
       name: "archive.pna",
       files,
       saveDir: saveDir || (await desktopDir()),
+      option: {
+        compression,
+      },
     })
       .then(() => {
         setProcessing(false);
@@ -143,11 +150,30 @@ export default function Create() {
         <ul className="file_list">
           {files.map((it) => (
             <li key={it} className="file_item">
+              {processing && it == name && <span>●</span>}
               <span>{it}</span>
-              {processing && it == name && <span>processing</span>}
             </li>
           ))}
         </ul>
+      </div>
+      <div className="row">
+        <details>
+          <summary>Detail options</summary>
+          <span>
+            <label htmlFor="compression">Compression</label>
+            <select
+              id="compression"
+              value={compression}
+              onChange={(e) => setCompression(e.target.value as Compression)}
+            >
+              {COMPRESSION.map((it) => (
+                <option key={it} value={it}>
+                  {it}
+                </option>
+              ))}
+            </select>
+          </span>
+        </details>
       </div>
       <div className="row">
         <span>
