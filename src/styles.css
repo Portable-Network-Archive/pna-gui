@@ -16,12 +16,13 @@ body {
   height: calc(100vh - 16px);
 }
 :root {
-  --base-color: #f6f6f6;
-  --base-color-light: #f6f6f6;
-  --base-color-dark: #e6e6e6;
-  --invert-color: #2f2f2f;
-  --invert-color-light: #3f3f3f;
-  --invert-color-dark: #1f1f1f;
+  --opacity: 0.95;
+  --base-color: rgba(246, 246, 246, var(--opacity));
+  --base-color-light: rgba(255, 255, 255, var(--opacity));
+  --base-color-dark: rgba(230, 230, 230, var(--opacity));
+  --invert-color: rgba(47, 47, 47, var(--opacity));
+  --invert-color-light: rgba(63, 63, 63, var(--opacity));
+  --invert-color-dark: rgba(31, 31, 31, var(--opacity));
   --primary-color: #646cff;
   --primary-color-light: #24c8db;
   --primary-color-dark: #535bf2;
@@ -126,12 +127,12 @@ button {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --base-color: #2f2f2f;
-    --base-color-light: #3f3f3f;
-    --base-color-dark: #1f1f1f;
-    --invert-color: #f6f6f6;
-    --invert-color-light: #f6f6f6;
-    --invert-color-dark: #f6f6f6;
+    --base-color: rgba(47, 47, 47, var(--opacity));
+    --base-color-light: rgba(63, 63, 63, var(--opacity));
+    --base-color-dark: rgba(31, 31, 31, var(--opacity));
+    --invert-color: rgba(246, 246, 246, var(--opacity));
+    --invert-color-light: rgba(246, 246, 246, var(--opacity));
+    --invert-color-dark: rgba(246, 246, 246, var(--opacity));
   }
 
   button:active {
