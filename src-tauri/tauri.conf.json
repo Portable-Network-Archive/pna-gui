@@ -10,6 +10,7 @@
     "version": "0.0.4"
   },
   "tauri": {
+    "macOSPrivateApi": true,
     "updater": {
       "active": true,
       "endpoints": [
@@ -57,6 +58,7 @@
     },
     "windows": [
       {
+        "transparent": true,
         "fullscreen": false,
         "resizable": true,
         "title": "portable-network-archive",
