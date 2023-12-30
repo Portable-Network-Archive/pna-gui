@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 import { desktopDir } from "@tauri-apps/api/path";
 import { readAllIfDir } from "../utils/fs";
+import { CubeIcon } from "@radix-ui/react-icons";
 import styles from "./Create.module.css";
+import Button from "../components/Button";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
@@ -191,7 +193,9 @@ export default function Create() {
             <option value={VALUE_OTHER}>Other</option>
           </select>
         </span>
-        <button onClick={create}>Create</button>
+        <Button icon={<CubeIcon />} onClick={create}>
+          <span>Create</span>
+        </Button>
       </div>
     </div>
   );
