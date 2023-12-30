@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 import { desktopDir } from "@tauri-apps/api/path";
 import { readAllIfDir } from "../utils/fs";
+import styles from "./Create.module.css";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
@@ -138,15 +139,15 @@ export default function Create() {
   }, []);
 
   return (
-    <div className="container">
-      <div className="row">
+    <div className={styles.container}>
+      <div className={styles.titleRow}>
         <h1>
           <span className="clickable" onClick={() => openFilePicker()}>
             <b>Drop here to add to Archive</b>
           </span>
         </h1>
       </div>
-      <div className="row">
+      <div className={styles.fileListRow}>
         <ul className="file_list">
           {files.map((it) => (
             <li key={it} className="file_item">
@@ -156,7 +157,7 @@ export default function Create() {
           ))}
         </ul>
       </div>
-      <div className="row">
+      <div className={styles.rowFull}>
         <details>
           <summary>Detail options</summary>
           <span>
@@ -175,7 +176,7 @@ export default function Create() {
           </span>
         </details>
       </div>
-      <div className="row">
+      <div className={styles.rowFull}>
         <span>
           <label htmlFor="save">Save to</label>
           <select ref={saveDirRef} id="save" onChange={onSelectSaveDir}>
