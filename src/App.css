@@ -17,6 +17,7 @@
   opacity: 1;
 }
 .file_list {
+  margin: 0 auto;
   list-style: none;
   background-color: var(--base-color-dark);
   padding: 0.1em;
