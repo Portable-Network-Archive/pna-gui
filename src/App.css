@@ -16,26 +16,3 @@
   text-shadow: #747bff 1px 0 10px;
   opacity: 1;
 }
-.file_list {
-  margin: 0 auto;
-  list-style: none;
-  background-color: var(--base-color-dark);
-  padding: 0.1em;
-  min-height: 9em;
-  max-height: 9em;
-  min-width: 30em;
-  width: calc(100% - 2em);
-  border-radius: 8px;
-  overflow: scroll;
-}
-
-.file_list > .file_item {
-  padding: 0 0.5em;
-  text-align: start;
-  white-space: nowrap;
-}
-
-.file_list > .file_item:nth-child(2n) {
-  background-color: var(--base-color-light);
-  border-radius: 4px;
-}

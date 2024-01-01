@@ -1,0 +1,18 @@
+.FileList {
+  list-style: none;
+  background-color: var(--base-color-dark);
+  padding: 0.1em;
+  border-radius: 8px;
+  overflow: scroll;
+}
+
+.FileList > .FileItem {
+  padding: 0 0.5em;
+  text-align: start;
+  white-space: nowrap;
+}
+
+.FileList > .FileItem:nth-child(2n) {
+  background-color: var(--base-color-light);
+  border-radius: 4px;
+}

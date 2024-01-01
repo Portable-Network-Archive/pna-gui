@@ -6,6 +6,7 @@ import { readAllIfDir } from "../utils/fs";
 import { CubeIcon } from "@radix-ui/react-icons";
 import styles from "./Create.module.css";
 import Button from "../components/Button";
+import * as FileList from "../components/FileList";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
@@ -150,14 +151,14 @@ export default function Create() {
         </h1>
       </div>
       <div className={styles.fileListRow}>
-        <ul className="file_list">
+        <FileList.Root className={styles.FileList}>
           {files.map((it) => (
-            <li key={it} className="file_item">
+            <FileList.Item key={it}>
               {processing && it == name && <span>●</span>}
               <span>{it}</span>
-            </li>
+            </FileList.Item>
           ))}
-        </ul>
+        </FileList.Root>
       </div>
       <div className={styles.rowFull}>
         <details>
