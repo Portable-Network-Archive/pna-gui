@@ -29,3 +29,11 @@
   min-width: 30em;
   width: calc(100% - 2em);
 }
+.FileListItem {
+  display: inline-flex;
+  align-items: center;
+  justify-items: start;
+}
+.FileListItem > .Icon {
+  margin-right: 0.3em;
+}

@@ -4,9 +4,10 @@ import { appWindow } from "@tauri-apps/api/window";
 import { desktopDir } from "@tauri-apps/api/path";
 import { readAllIfDir } from "../utils/fs";
 import { CubeIcon } from "@radix-ui/react-icons";
-import styles from "./Create.module.css";
+import ProcessingIcon from "../components/ProcessingIcon";
 import Button from "../components/Button";
 import * as FileList from "../components/FileList";
+import styles from "./Create.module.css";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
@@ -153,8 +154,12 @@ export default function Create() {
       <div className={styles.fileListRow}>
         <FileList.Root className={styles.FileList}>
           {files.map((it) => (
-            <FileList.Item key={it}>
-              {processing && it == name && <span>●</span>}
+            <FileList.Item key={it} className={styles.FileListItem}>
+              {processing && it == name && (
+                <span className={styles.Icon}>
+                  <ProcessingIcon />
+                </span>
+              )}
               <span>{it}</span>
             </FileList.Item>
           ))}
