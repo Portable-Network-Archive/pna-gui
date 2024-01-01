@@ -21,3 +21,11 @@
   grid-column: var(--grid-column-start) / var(--grid-column-end);
   width: 100%;
 }
+
+.FileList {
+  margin: 0 auto;
+  min-height: 9em;
+  max-height: 9em;
+  min-width: 30em;
+  width: calc(100% - 2em);
+}
