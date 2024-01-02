@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Extract, Create } from "./tabs";
 import { appWindow } from "@tauri-apps/api/window";
-import "./App.css";
+import styles from "./App.module.css";
 
 type Mode = "extract" | "create";
 
@@ -17,20 +17,27 @@ function App() {
   }, []);
 
   return (
-    <div className="container">
-      <div className="row tab">
-        <span
-          className={"item " + (mode === "extract" ? "" : "inactive")}
-          onClick={() => setMode("extract")}
-        >
-          Extract
-        </span>
-        <span
-          className={"item " + (mode === "create" ? "" : "inactive")}
-          onClick={() => setMode("create")}
-        >
-          Create
-        </span>
+    <div className={styles.Container}>
+      <div className={styles.LeftMenuRoot}>
+        <div className={styles.MenuContainer}>
+          <span
+            className={`${styles.Item} ${
+              mode === "extract" ? styles.Active : styles.Inactive
+            }`}
+            onClick={() => setMode("extract")}
+          >
+            Extract
+          </span>
+          <span
+            className={`${styles.Item} ${
+              mode === "create" ? styles.Active : styles.Inactive
+            }`}
+            onClick={() => setMode("create")}
+          >
+            Create
+          </span>
+        </div>
+        <div></div>
       </div>
       {mode === "extract" && <Extract />}
       {mode === "create" && <Create />}

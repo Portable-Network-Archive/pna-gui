@@ -1,0 +1,35 @@
+.Container {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 8em 1fr;
+}
+.LeftMenuRoot {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 2em;
+  background-color: var(--base-color-dark);
+}
+.MenuContainer {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-auto-rows: 2em;
+}
+.MenuContainer .Item {
+  display: inline-flex;
+  font-weight: bold;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+}
+.MenuContainer .Item.Active {
+  text-shadow: #747bff 1px 0 10px;
+  background-color: var(--base-color);
+  border-left: 2px solid var(--primary-color);
+}
+.MenuContainer .Item.Inactive {
+  border-left: 2px solid transparent;
+}
+.MenuContainer .Item.Inactive:hover {
+  text-shadow: #747bff 1px 0 10px;
+  border-left: 2px solid var(--primary-color);
+}
