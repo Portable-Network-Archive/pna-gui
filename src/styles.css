@@ -17,13 +17,16 @@ body {
   width: 100vw;
 }
 :root {
+  --color-black: rgba(47, 47, 47, var(--opacity));
+  --color-black-light: rgba(63, 63, 63, var(--opacity));
+  --color-black-dark: rgba(31, 31, 31, var(--opacity));
   --opacity: 0.95;
   --base-color: rgba(246, 246, 246, var(--opacity));
   --base-color-light: rgba(255, 255, 255, var(--opacity));
   --base-color-dark: rgba(230, 230, 230, var(--opacity));
-  --invert-color: rgba(47, 47, 47, var(--opacity));
-  --invert-color-light: rgba(63, 63, 63, var(--opacity));
-  --invert-color-dark: rgba(31, 31, 31, var(--opacity));
+  --invert-color: var(--color-black);
+  --invert-color-light: var(--color-black-light);
+  --invert-color-dark: var(--color-black-dark);
   --primary-color: #646cff;
   --primary-color-light: #24c8db;
   --primary-color-dark: #535bf2;
@@ -128,9 +131,9 @@ button {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --base-color: rgba(47, 47, 47, var(--opacity));
-    --base-color-light: rgba(63, 63, 63, var(--opacity));
-    --base-color-dark: rgba(31, 31, 31, var(--opacity));
+    --base-color: var(--color-black);
+    --base-color-light: var(--color-black-light);
+    --base-color-dark: var(--color-black-dark);
     --invert-color: rgba(246, 246, 246, var(--opacity));
     --invert-color-light: rgba(246, 246, 246, var(--opacity));
     --invert-color-dark: rgba(246, 246, 246, var(--opacity));
