@@ -22,6 +22,47 @@
   width: 100%;
 }
 
+.IconButton {
+  all: unset;
+  font-family: inherit;
+  border-radius: 100%;
+  height: 25px;
+  width: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--invert-color);
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.IconButton:hover {
+  box-shadow: #747bff 1px 0 10px;
+}
+.IconButton:focus {
+  box-shadow: 0 0 0 2px var(--primary-color);
+}
+
+.Fieldset {
+  all: unset;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.Label {
+  font-size: 15px;
+  color: var(--invert-color);
+  width: 90px;
+  text-align: right;
+}
+.SaveButtonContainer {
+  display: flex;
+  margin-top: 25px;
+  justify-content: flex-end;
+}
+
 .FileList {
   margin: 0 auto;
   min-height: 9em;
@@ -36,4 +77,22 @@
 }
 .FileListItem > .Icon {
   margin-right: 0.3em;
+}
+
+.FilePathBar {
+  display: flex;
+  justify-content: left;
+  align-items: center;
+  margin: 0.5em;
+  background-color: var(--base-color-dark);
+}
+.FilePathBar .FilePath {
+  color: var(--invert-color-dark);
+  opacity: 0.5;
+}
+.FilePathBar .Icon {
+  margin: 0.5em;
+}
+.FilePathBar .Icon:hover {
+  box-shadow: #747bff 1px 0 10px;
 }

@@ -3,9 +3,10 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 import { desktopDir } from "@tauri-apps/api/path";
 import { readAllIfDir } from "../utils/fs";
-import { CubeIcon } from "@radix-ui/react-icons";
+import { CubeIcon, FileIcon, Cross2Icon } from "@radix-ui/react-icons";
 import ProcessingIcon from "../components/ProcessingIcon";
 import Button from "../components/Button";
+import * as Dialog from "../components/Dialog";
 import * as FileList from "../components/FileList";
 import styles from "./Create.module.css";
 
@@ -17,6 +18,17 @@ const EVENT_ON_ENTRY_START = "on_entry_start";
 const VALUE_OTHER = "other";
 const VALUE_DESKTOP = "desktop";
 
+const SPECIAL_SAVE_PLACE = [
+  {
+    display: "Desktop",
+    value: VALUE_DESKTOP,
+  },
+  {
+    display: "Other",
+    value: VALUE_OTHER,
+  },
+];
+
 const COMPRESSION = ["none", "zlib", "zstd", "xz"] as const;
 type Compression = (typeof COMPRESSION)[number];
 
@@ -25,8 +37,21 @@ export default function Create() {
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
   const [compression, setCompression] = useState<Compression>("zstd");
-  const [saveDir, setSaveDir] = useState<string | null>(null);
+  const [saveSelectOptions, setSaveSelectOptions] = useState(
+    SPECIAL_SAVE_PLACE.map((it) => {
+      return { selected: false, ...it };
+    }),
+  );
+  const [saveDir, _setSaveDir] = useState<string | null>(null);
   const saveDirRef = useRef<HTMLSelectElement>(null);
+
+  const setSaveDir = async (value: string) => {
+    if (value === VALUE_DESKTOP) {
+      _setSaveDir(await desktopDir());
+    } else {
+      _setSaveDir(value);
+    }
+  };
 
   const addFiles = async (paths: string[]) => {
     let files: string[] = [];
@@ -58,9 +83,12 @@ export default function Create() {
       return;
     }
     if (selected.item(0)?.value === VALUE_OTHER) {
+      setSaveSelectOptions((old) =>
+        old.map((it) => {
+          return { ...it, selected: false };
+        }),
+      );
       openDirPicker();
-    } else {
-      setSaveDir(null);
     }
   };
 
@@ -118,15 +146,16 @@ export default function Create() {
 
   useEffect(() => {
     const unlisten = appWindow.listen<string>(EVENT_ON_SAVE_DIR_PICKED, (e) => {
-      setSaveDir(e.payload);
       const current = saveDirRef.current;
       if (current === null) {
         return;
       }
-      for (let index = 0; index < current.options.length; index++) {
-        current.options[index].selected =
-          current.options[index].value === e.payload;
-      }
+      setSaveSelectOptions([
+        { value: e.payload, display: e.payload, selected: true },
+        ...SPECIAL_SAVE_PLACE.map((it) => {
+          return { selected: false, ...it };
+        }),
+      ]);
     });
     return () => {
       unlisten.then((it) => it());
@@ -142,8 +171,64 @@ export default function Create() {
     };
   }, []);
 
+  useEffect(() => {
+    desktopDir().then(setSaveDir);
+  }, []);
+
   return (
     <div className={styles.container}>
+      <div className={styles.rowFull}>
+        <div className={styles.FilePathBar}>
+          <Dialog.Root>
+            <Dialog.Trigger asChild>
+              <FileIcon className={styles.Icon} />
+            </Dialog.Trigger>
+            <Dialog.Portal>
+              <Dialog.Overlay />
+              <Dialog.Content>
+                <Dialog.Title>Save Path</Dialog.Title>
+                <Dialog.Description>Change to save path.</Dialog.Description>
+                <fieldset className={`${styles.Fieldset}`}>
+                  <label className={`${styles.Label}`} htmlFor="save">
+                    Save to
+                  </label>
+                  <select ref={saveDirRef} id="save" onChange={onSelectSaveDir}>
+                    {saveSelectOptions.map((it) => (
+                      <option
+                        key={it.value}
+                        value={it.value}
+                        selected={it.selected}
+                      >
+                        {it.display}
+                      </option>
+                    ))}
+                  </select>
+                </fieldset>
+                <div className={`${styles.SaveButtonContainer}`}>
+                  <Dialog.Close
+                    asChild
+                    onClick={async () => {
+                      const current = saveDirRef.current;
+                      if (current === null) {
+                        return;
+                      }
+                      setSaveDir(current.value);
+                    }}
+                  >
+                    <Button>Save changes</Button>
+                  </Dialog.Close>
+                </div>
+                <Dialog.Close asChild>
+                  <button className={`${styles.IconButton}`} aria-label="Close">
+                    <Cross2Icon />
+                  </button>
+                </Dialog.Close>
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
+          <span className={styles.FilePath}>{saveDir}</span>
+        </div>
+      </div>
       <div className={styles.titleRow}>
         <h1>
           <span className="clickable" onClick={() => openFilePicker()}>
@@ -185,20 +270,6 @@ export default function Create() {
         </details>
       </div>
       <div className={styles.rowFull}>
-        <span>
-          <label htmlFor="save">Save to</label>
-          <select ref={saveDirRef} id="save" onChange={onSelectSaveDir}>
-            {saveDir && (
-              <option value={saveDir} selected>
-                {saveDir}
-              </option>
-            )}
-            {saveDir && <hr></hr>}
-            <option value={VALUE_DESKTOP}>Desktop</option>
-            <hr></hr>
-            <option value={VALUE_OTHER}>Other</option>
-          </select>
-        </span>
         <Button icon={<CubeIcon />} onClick={create}>
           <span>Create</span>
         </Button>
