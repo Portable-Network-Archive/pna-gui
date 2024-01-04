@@ -177,8 +177,8 @@ export default function Create() {
   }, []);
 
   return (
-    <div className={styles.container}>
-      <div className={styles.rowFull}>
+    <div className={styles.Container}>
+      <div className={styles.RowFull}>
         <div className={styles.FilePathBar}>
           <Dialog.Root>
             <Tooltip.Root>
@@ -265,27 +265,26 @@ export default function Create() {
           ))}
         </FileList.Root>
       </div>
-      <div className={styles.rowFull}>
-        <details>
-          <summary>Detail options</summary>
-          <span>
-            <label htmlFor="compression">Compression</label>
-            <select
-              id="compression"
-              value={compression}
-              onChange={(e) => setCompression(e.target.value as Compression)}
-            >
-              {COMPRESSION.map((it) => (
-                <option key={it} value={it}>
-                  {it}
-                </option>
-              ))}
-            </select>
-          </span>
-        </details>
-        <Button icon={<CubeIcon />} onClick={create}>
-          <span>Create</span>
-        </Button>
+      <div className={`${styles.RowFull} ${styles.OptionsRow}`}>
+        <span>
+          <label htmlFor="compression">Compression</label>
+          <select
+            id="compression"
+            value={compression}
+            onChange={(e) => setCompression(e.target.value as Compression)}
+          >
+            {COMPRESSION.map((it) => (
+              <option key={it} value={it}>
+                {it}
+              </option>
+            ))}
+          </select>
+        </span>
+        <div>
+          <Button icon={<CubeIcon />} onClick={create}>
+            <span>Create</span>
+          </Button>
+        </div>
       </div>
     </div>
   );
