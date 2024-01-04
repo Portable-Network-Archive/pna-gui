@@ -7,9 +7,10 @@
   },
   "package": {
     "productName": "Portable Network Archive",
-    "version": "0.0.4"
+    "version": "0.0.5"
   },
   "tauri": {
+    "macOSPrivateApi": true,
     "updater": {
       "active": true,
       "endpoints": [
@@ -24,6 +25,9 @@
     "allowlist": {
       "all": false,
       "path": {
+        "all": true
+      },
+      "fs": {
         "all": true
       },
       "shell": {
@@ -54,11 +58,12 @@
     },
     "windows": [
       {
+        "transparent": true,
         "fullscreen": false,
         "resizable": true,
         "title": "portable-network-archive",
-        "width": 600,
-        "height": 400
+        "width": 950,
+        "height": 450
       }
     ]
   }

@@ -1,0 +1,112 @@
+.Container {
+  --grid-column-size: 12;
+  --grid-column-start: 1;
+  --grid-column-end: calc(var(--grid-column-size) + 1);
+  height: 100%;
+  width: 100%;
+  padding: 0.5em;
+  display: grid;
+  grid-template-columns: repeat(var(--grid-column-size), 1fr);
+  grid-template-rows: 2em 4em 1fr 3em;
+}
+.RowFull {
+  grid-column: var(--grid-column-start) / var(--grid-column-end);
+  height: max-content;
+  width: 100%;
+}
+.titleRow {
+  grid-column: var(--grid-column-start) / var(--grid-column-end);
+  width: 100%;
+}
+
+.fileListRow {
+  grid-column: var(--grid-column-start) / var(--grid-column-end);
+  width: 100%;
+}
+.OptionsRow {
+  margin-top: 0.3em;
+  display: flex;
+  justify-content: space-between;
+}
+
+.TooltipContent {
+  border-radius: 0.5em;
+  font-size: 0.7em;
+  font-weight: bold;
+  border: 1px solid var(--invert-color-dark);
+  background-color: var(--base-color-dark);
+  padding: 0 0.6em;
+}
+
+.IconButton {
+  all: unset;
+  font-family: inherit;
+  border-radius: 100%;
+  height: 25px;
+  width: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--invert-color);
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.IconButton:hover {
+  box-shadow: #747bff 1px 0 10px;
+}
+.IconButton:focus {
+  box-shadow: 0 0 0 2px var(--primary-color);
+}
+
+.Fieldset {
+  all: unset;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.Label {
+  font-size: 15px;
+  color: var(--invert-color);
+  width: 90px;
+  text-align: right;
+}
+.SaveButtonContainer {
+  display: flex;
+  margin-top: 25px;
+  justify-content: flex-end;
+}
+
+.FileList {
+  margin: 0 auto;
+  height: 100%;
+  width: 100%;
+}
+.FileListItem {
+  display: inline-flex;
+  align-items: center;
+  justify-items: start;
+}
+.FileListItem > .Icon {
+  margin-right: 0.3em;
+}
+
+.FilePathBar {
+  display: flex;
+  justify-content: left;
+  align-items: center;
+  background-color: var(--base-color-dark);
+  border-radius: 0.5em;
+}
+.FilePathBar .FilePath {
+  color: var(--invert-color-dark);
+  opacity: 0.5;
+}
+.FilePathBar .Icon {
+  margin: 0.5em;
+}
+.FilePathBar .Icon:hover {
+  box-shadow: #747bff 1px 0 10px;
+}

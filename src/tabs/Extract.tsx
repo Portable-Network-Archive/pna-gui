@@ -26,7 +26,7 @@ export default function Extract() {
     if (processing) {
       return;
     }
-    invoke("open_file_picker", { event: EVENT_ON_FILE_PICKED });
+    invoke("open_pna_file_picker", { event: EVENT_ON_FILE_PICKED });
   };
 
   useEffect(() => {

@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 import { desktopDir } from "@tauri-apps/api/path";
+import { readAllIfDir } from "../utils/fs";
+import { CubeIcon, FileIcon, Cross2Icon } from "@radix-ui/react-icons";
+import * as Tooltip from "@radix-ui/react-tooltip";
+import ProcessingIcon from "../components/ProcessingIcon";
+import Button from "../components/Button";
+import * as Dialog from "../components/Dialog";
+import * as FileList from "../components/FileList";
+import styles from "./Create.module.css";
 
 const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
@@ -11,16 +19,48 @@ const EVENT_ON_ENTRY_START = "on_entry_start";
 const VALUE_OTHER = "other";
 const VALUE_DESKTOP = "desktop";
 
+const SPECIAL_SAVE_PLACE = [
+  {
+    display: "Desktop",
+    value: VALUE_DESKTOP,
+  },
+  {
+    display: "Other",
+    value: VALUE_OTHER,
+  },
+];
+
+const COMPRESSION = ["none", "zlib", "zstd", "xz"] as const;
+type Compression = (typeof COMPRESSION)[number];
+
 export default function Create() {
   const [files, setFiles] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
-  const [saveDir, setSaveDir] = useState<string | null>(null);
+  const [compression, setCompression] = useState<Compression>("zstd");
+  const [saveSelectOptions, setSaveSelectOptions] = useState(
+    SPECIAL_SAVE_PLACE.map((it) => {
+      return { selected: false, ...it };
+    }),
+  );
+  const [saveDir, _setSaveDir] = useState<string | null>(null);
   const saveDirRef = useRef<HTMLSelectElement>(null);
 
-  const addFiles = (paths: string[]) => {
+  const setSaveDir = async (value: string) => {
+    if (value === VALUE_DESKTOP) {
+      _setSaveDir(await desktopDir());
+    } else {
+      _setSaveDir(value);
+    }
+  };
+
+  const addFiles = async (paths: string[]) => {
+    let files: string[] = [];
+    for (const path of paths) {
+      files.push(...(await readAllIfDir(path)));
+    }
     setFiles((current) => {
-      return [...current, ...paths];
+      return [...current, ...files];
     });
   };
 
@@ -44,9 +84,12 @@ export default function Create() {
       return;
     }
     if (selected.item(0)?.value === VALUE_OTHER) {
+      setSaveSelectOptions((old) =>
+        old.map((it) => {
+          return { ...it, selected: false };
+        }),
+      );
       openDirPicker();
-    } else {
-      setSaveDir(null);
     }
   };
 
@@ -59,6 +102,9 @@ export default function Create() {
       name: "archive.pna",
       files,
       saveDir: saveDir || (await desktopDir()),
+      option: {
+        compression,
+      },
     })
       .then(() => {
         setProcessing(false);
@@ -101,15 +147,16 @@ export default function Create() {
 
   useEffect(() => {
     const unlisten = appWindow.listen<string>(EVENT_ON_SAVE_DIR_PICKED, (e) => {
-      setSaveDir(e.payload);
       const current = saveDirRef.current;
       if (current === null) {
         return;
       }
-      for (let index = 0; index < current.options.length; index++) {
-        current.options[index].selected =
-          current.options[index].value === e.payload;
-      }
+      setSaveSelectOptions([
+        { value: e.payload, display: e.payload, selected: true },
+        ...SPECIAL_SAVE_PLACE.map((it) => {
+          return { selected: false, ...it };
+        }),
+      ]);
     });
     return () => {
       unlisten.then((it) => it());
@@ -125,41 +172,119 @@ export default function Create() {
     };
   }, []);
 
+  useEffect(() => {
+    desktopDir().then(setSaveDir);
+  }, []);
+
   return (
-    <div className="container">
-      <div className="row">
+    <div className={styles.Container}>
+      <div className={styles.RowFull}>
+        <div className={styles.FilePathBar}>
+          <Dialog.Root>
+            <Tooltip.Root>
+              <Dialog.Trigger asChild>
+                <Tooltip.Trigger asChild>
+                  <FileIcon className={styles.Icon} />
+                </Tooltip.Trigger>
+              </Dialog.Trigger>
+              <Tooltip.Portal>
+                <Tooltip.Content
+                  className={styles.TooltipContent}
+                  side="bottom"
+                  align="start"
+                >
+                  Save path
+                  <Tooltip.Arrow />
+                </Tooltip.Content>
+              </Tooltip.Portal>
+            </Tooltip.Root>
+            <Dialog.Portal>
+              <Dialog.Overlay />
+              <Dialog.Content>
+                <Dialog.Title>Save Path</Dialog.Title>
+                <Dialog.Description>Change to save path.</Dialog.Description>
+                <fieldset className={`${styles.Fieldset}`}>
+                  <label className={`${styles.Label}`} htmlFor="save">
+                    Save to
+                  </label>
+                  <select ref={saveDirRef} id="save" onChange={onSelectSaveDir}>
+                    {saveSelectOptions.map((it) => (
+                      <option
+                        key={it.value}
+                        value={it.value}
+                        selected={it.selected}
+                      >
+                        {it.display}
+                      </option>
+                    ))}
+                  </select>
+                </fieldset>
+                <div className={`${styles.SaveButtonContainer}`}>
+                  <Dialog.Close
+                    asChild
+                    onClick={async () => {
+                      const current = saveDirRef.current;
+                      if (current === null) {
+                        return;
+                      }
+                      setSaveDir(current.value);
+                    }}
+                  >
+                    <Button>Save changes</Button>
+                  </Dialog.Close>
+                </div>
+                <Dialog.Close asChild>
+                  <button className={`${styles.IconButton}`} aria-label="Close">
+                    <Cross2Icon />
+                  </button>
+                </Dialog.Close>
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
+          <span className={styles.FilePath}>{saveDir}</span>
+        </div>
+      </div>
+      <div className={styles.titleRow}>
         <h1>
           <span className="clickable" onClick={() => openFilePicker()}>
             <b>Drop here to add to Archive</b>
           </span>
         </h1>
       </div>
-      <div className="row">
-        <ul className="file_list">
+      <div className={styles.fileListRow}>
+        <FileList.Root className={styles.FileList}>
           {files.map((it) => (
-            <li key={it} className="file_item">
+            <FileList.Item key={it} className={styles.FileListItem}>
+              {processing && it == name && (
+                <span className={styles.Icon}>
+                  <ProcessingIcon />
+                </span>
+              )}
               <span>{it}</span>
-              {processing && it == name && <span>processing</span>}
-            </li>
+            </FileList.Item>
           ))}
-        </ul>
+        </FileList.Root>
       </div>
-      <div className="row">
+      <div className={`${styles.RowFull} ${styles.OptionsRow}`}>
         <span>
-          <label htmlFor="save">Save to</label>
-          <select ref={saveDirRef} id="save" onChange={onSelectSaveDir}>
-            {saveDir && (
-              <option value={saveDir} selected>
-                {saveDir}
+          <label htmlFor="compression">Compression</label>
+          <select
+            id="compression"
+            value={compression}
+            onChange={(e) => setCompression(e.target.value as Compression)}
+          >
+            {COMPRESSION.map((it) => (
+              <option key={it} value={it}>
+                {it}
               </option>
-            )}
-            {saveDir && <hr></hr>}
-            <option value={VALUE_DESKTOP}>Desktop</option>
-            <hr></hr>
-            <option value={VALUE_OTHER}>Other</option>
+            ))}
           </select>
         </span>
-        <button onClick={create}>Create</button>
+        <div>
+          <Button icon={<CubeIcon />} onClick={create}>
+            <span>Create</span>
+          </Button>
+        </div>
       </div>
     </div>
   );
