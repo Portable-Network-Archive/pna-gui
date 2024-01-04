@@ -4,6 +4,7 @@ import { appWindow } from "@tauri-apps/api/window";
 import { desktopDir } from "@tauri-apps/api/path";
 import { readAllIfDir } from "../utils/fs";
 import { CubeIcon, FileIcon, Cross2Icon } from "@radix-ui/react-icons";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import ProcessingIcon from "../components/ProcessingIcon";
 import Button from "../components/Button";
 import * as Dialog from "../components/Dialog";
@@ -180,9 +181,23 @@ export default function Create() {
       <div className={styles.rowFull}>
         <div className={styles.FilePathBar}>
           <Dialog.Root>
-            <Dialog.Trigger asChild>
-              <FileIcon className={styles.Icon} />
-            </Dialog.Trigger>
+            <Tooltip.Root>
+              <Dialog.Trigger asChild>
+                <Tooltip.Trigger asChild>
+                  <FileIcon className={styles.Icon} />
+                </Tooltip.Trigger>
+              </Dialog.Trigger>
+              <Tooltip.Portal>
+                <Tooltip.Content
+                  className={styles.TooltipContent}
+                  side="bottom"
+                  align="start"
+                >
+                  Save path
+                  <Tooltip.Arrow />
+                </Tooltip.Content>
+              </Tooltip.Portal>
+            </Tooltip.Root>
             <Dialog.Portal>
               <Dialog.Overlay />
               <Dialog.Content>
@@ -268,8 +283,6 @@ export default function Create() {
             </select>
           </span>
         </details>
-      </div>
-      <div className={styles.rowFull}>
         <Button icon={<CubeIcon />} onClick={create}>
           <span>Create</span>
         </Button>
