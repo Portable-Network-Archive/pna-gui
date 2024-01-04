@@ -1,3 +1,6 @@
+.DialogTrigger {
+  all: unset;
+}
 .DialogOverlay {
   background-color: #00000088;
   position: fixed;

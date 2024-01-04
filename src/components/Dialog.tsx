@@ -8,7 +8,12 @@ export const Root: React.FC<Dialog.DialogProps> = ({ ...props }) => (
 
 export const Trigger: React.FC<
   Dialog.DialogTriggerProps & React.RefAttributes<HTMLButtonElement>
-> = ({ ...props }) => <Dialog.Trigger {...props} />;
+> = ({ className, ...props }) => (
+  <Dialog.Trigger
+    className={`${styles.DialogTrigger} ${className}`}
+    {...props}
+  />
+);
 
 export const Portal: React.FC<Dialog.PortalProps> = ({ ...props }) => (
   <Dialog.Portal {...props} />
