@@ -168,7 +168,7 @@ where
     on_change_archive(Event::Start, &out_dir);
     let file = fs::File::open(path)?;
     let mut archive = libpna::Archive::read_header(file)?;
-    for entry in archive.entries() {
+    for entry in archive.entries_with_password(None) {
         let entry = entry?;
         if libpna::DataKind::File != entry.header().data_kind() {
             continue;
