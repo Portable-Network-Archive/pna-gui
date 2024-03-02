@@ -1,5 +1,6 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod utils;
 
 use std::{
     fs, io,
@@ -16,7 +17,7 @@ use tauri::{api::dialog::FileDialogBuilder, CustomMenuItem, Menu, Window};
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
-fn open_pna_file_picker(window: Window, event: String) {
+async fn open_pna_file_picker(window: Window, event: String) {
     FileDialogBuilder::new()
         .add_filter("pna", &["pna"])
         .pick_file(move |path| {
@@ -25,21 +26,21 @@ fn open_pna_file_picker(window: Window, event: String) {
 }
 
 #[tauri::command]
-fn open_files_picker(window: Window, event: String) {
+async fn open_files_picker(window: Window, event: String) {
     FileDialogBuilder::new().pick_files(move |paths| {
         paths.and_then(|p| window.emit(&event, p).ok());
     })
 }
 
 #[tauri::command]
-fn open_dir_picker(window: Window, event: String) {
+async fn open_dir_picker(window: Window, event: String) {
     FileDialogBuilder::new().pick_folder(move |path| {
         path.and_then(|p| window.emit(&event, p).ok());
     })
 }
 
-#[tauri::command(async)]
-fn create(
+#[tauri::command]
+async fn create(
     window: Window,
     archive_finish_event: String,
     entry_start_event: String,
@@ -69,10 +70,19 @@ fn create(
     )?)
 }
 
-#[tauri::command(async)]
-fn extract(window: Window, event: String, path: &str) -> tauri::Result<()> {
+#[tauri::command]
+async fn extract(
+    window: Window,
+    event: String,
+    path: &str,
+    password: Option<String>,
+) -> tauri::Result<()> {
+    if password.is_none() && utils::is_encrypted(path)? {
+        return Err(tauri::Error::Io(io::Error::other("encrypted")));
+    }
     Ok(_extract(
         path.as_ref(),
+        password.as_deref(),
         |e, name| match e {
             Event::Start => (),
             Event::Finish => open::that(name).unwrap(),
@@ -152,6 +162,7 @@ where
 
 fn _extract<OnChangeArchive, OnChangeEntry>(
     path: &Path,
+    password: Option<&str>,
     on_change_archive: OnChangeArchive,
     on_change_entry: OnChangeEntry,
 ) -> io::Result<()>
@@ -168,7 +179,7 @@ where
     on_change_archive(Event::Start, &out_dir);
     let file = fs::File::open(path)?;
     let mut archive = libpna::Archive::read_header(file)?;
-    for entry in archive.entries() {
+    for entry in archive.entries_with_password(password) {
         let entry = entry?;
         if libpna::DataKind::File != entry.header().data_kind() {
             continue;
@@ -180,7 +191,7 @@ where
             fs::create_dir_all(parent)?;
         }
         let mut writer = fs::File::create(out_path)?;
-        let mut reader = entry.reader(libpna::ReadOption::with_password::<String>(None))?;
+        let mut reader = entry.reader(libpna::ReadOption::with_password(password))?;
         io::copy(&mut reader, &mut writer)?;
         on_change_entry(Event::Finish, name);
     }
