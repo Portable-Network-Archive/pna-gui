@@ -42,7 +42,7 @@ jobs:
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     container:
-      image: ghcr.io/catthehacker/ubuntu:act-22.04
+      image: "ghcr.io/catthehacker/ubuntu:act-22.04 --platform=linux/aarch64"
     steps:
       - uses: actions/checkout@v4
       - name: setup node
