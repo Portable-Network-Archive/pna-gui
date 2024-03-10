@@ -1,6 +1,6 @@
 [package]
 name = "pna-gui"
-version = "0.0.6"
+version = "0.0.7"
 description = "Portable-Network-Archive GUI"
 authors = ["Portable-Network-Archive Developers"]
 license = "MIT"
@@ -17,7 +17,7 @@ tauri = { version = "1.6.1", features = [ "macos-private-api", "fs-all", "path-a
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 libpna = "0.7.0"
-open = "5.0.1"
+open = "5.1.1"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
