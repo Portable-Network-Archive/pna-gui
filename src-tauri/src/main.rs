@@ -99,7 +99,7 @@ enum Event {
     Finish,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 enum Compression {
     #[serde(rename = "none")]
     None,
@@ -122,9 +122,31 @@ impl From<Compression> for libpna::Compression {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+enum Encryption {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "aes")]
+    Aes,
+    #[serde(rename = "camellia")]
+    Camellia,
+}
+
+impl From<Encryption> for libpna::Encryption {
+    fn from(value: Encryption) -> Self {
+        match value {
+            Encryption::None => Self::No,
+            Encryption::Aes => Self::Aes,
+            Encryption::Camellia => Self::Camellia,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct PnaOption {
     compression: Compression,
+    encryption: Encryption,
+    password: Option<String>,
 }
 
 fn _create<OnChangeArchive, OnChangeEntry>(
@@ -149,6 +171,8 @@ where
         let mut f = fs::File::open(file)?;
         let option = WriteOption::builder()
             .compression(option.compression.into())
+            .encryption(option.encryption.into())
+            .password(option.password.clone())
             .build();
         let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), option)?;
         io::copy(&mut f, &mut entry)?;
