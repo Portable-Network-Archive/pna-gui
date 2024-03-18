@@ -33,11 +33,16 @@ const SPECIAL_SAVE_PLACE = [
 const COMPRESSION = ["none", "zlib", "zstd", "xz"] as const;
 type Compression = (typeof COMPRESSION)[number];
 
+const ENCRYPTION = ["none", "aes", "camellia"] as const;
+type Encryption = (typeof ENCRYPTION)[number];
+
 export default function Create() {
   const [files, setFiles] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
   const [compression, setCompression] = useState<Compression>("zstd");
+  const [encryption, setEncryption] = useState<Encryption>("none");
+  const [password, setPassword] = useState<string>("");
   const [saveSelectOptions, setSaveSelectOptions] = useState(
     SPECIAL_SAVE_PLACE.map((it) => {
       return { selected: false, ...it };
@@ -94,6 +99,10 @@ export default function Create() {
   };
 
   const create = async () => {
+    if (encryption !== "none" && password.length === 0) {
+      window.alert("password is needed");
+      return;
+    }
     setProcessing(true);
     // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
     invoke("create", {
@@ -104,6 +113,8 @@ export default function Create() {
       saveDir: saveDir || (await desktopDir()),
       option: {
         compression,
+        encryption,
+        password: password.length === 0 ? null : password,
       },
     })
       .then(() => {
@@ -266,7 +277,7 @@ export default function Create() {
         </FileList.Root>
       </div>
       <div className={`${styles.RowFull} ${styles.OptionsRow}`}>
-        <span>
+        <div>
           <label htmlFor="compression">Compression</label>
           <select
             id="compression"
@@ -279,7 +290,23 @@ export default function Create() {
               </option>
             ))}
           </select>
-        </span>
+          <label htmlFor="encryption">Encryption</label>
+          <select
+            id="encryption"
+            value={encryption}
+            onChange={(e) => setEncryption(e.target.value as Encryption)}
+          >
+            {ENCRYPTION.map((it) => (
+              <option key={it}>{it}</option>
+            ))}
+          </select>
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            onChange={(e) => setPassword(e.target.value)}
+          ></input>
+        </div>
         <div>
           <Button icon={<CubeIcon />} onClick={create}>
             <span>Create</span>
