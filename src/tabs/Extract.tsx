@@ -20,19 +20,21 @@ export default function Extract() {
     setProcessing(true);
     // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
     invoke("extract", { path, password, event: EVENT_ON_START_PROCESS_ENTRY })
-      .then(() => {})
+      .then(() => {
+        setArchivePath(undefined);
+        setPassword(undefined);
+        setProcessing(false);
+      })
       .catch((err) => {
         const message = err.toString() as string;
         if (message.includes("encrypted")) {
           setOpenPasswordDialog(true);
           return;
         }
-        window.alert(err);
-      })
-      .finally(() => {
         setArchivePath(undefined);
         setPassword(undefined);
         setProcessing(false);
+        window.alert(err);
       });
   };
 
