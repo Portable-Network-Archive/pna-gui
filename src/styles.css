@@ -106,6 +106,12 @@ button {
   box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
 }
 
+select:disabled,
+input:disabled,
+button:disabled {
+  background-color: var(--base-color-light);
+}
+
 button {
   cursor: pointer;
 }
