@@ -304,6 +304,7 @@ export default function Create() {
           <input
             id="password"
             type="password"
+            disabled={encryption === "none"}
             onChange={(e) => setPassword(e.target.value)}
           ></input>
         </div>
