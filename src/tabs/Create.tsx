@@ -12,7 +12,6 @@ import * as Dialog from "../components/Dialog";
 import * as FileList from "../components/FileList";
 import styles from "./Create.module.css";
 
-const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
 const EVENT_ON_FINISH = "on_finish";
 const EVENT_ON_ENTRY_START = "on_entry_start";
 
@@ -80,14 +79,32 @@ export default function Create() {
     await addFiles([files].flat());
   };
 
-  const openDirPicker = () => {
+  const openDirPicker = async () => {
     if (processing) {
       return;
     }
-    invoke("open_dir_picker", { event: EVENT_ON_SAVE_DIR_PICKED });
+    const dirs = await open({ directory: true });
+    if (dirs === null) {
+      return;
+    }
+    // NOTE: take first element
+    const dir = [dirs].flat().pop();
+    if (dir === undefined) {
+      return;
+    }
+    const current = saveDirRef.current;
+    if (current === null) {
+      return;
+    }
+    setSaveSelectOptions([
+      { value: dir, display: dir, selected: true },
+      ...SPECIAL_SAVE_PLACE.map((it) => {
+        return { selected: false, ...it };
+      }),
+    ]);
   };
 
-  const onSelectSaveDir = () => {
+  const onSelectSaveDir = async () => {
     const selected = saveDirRef.current?.selectedOptions;
     if (selected === undefined || selected.length === 0) {
       return;
@@ -98,7 +115,7 @@ export default function Create() {
           return { ...it, selected: false };
         }),
       );
-      openDirPicker();
+      await openDirPicker();
     }
   };
 
@@ -145,24 +162,6 @@ export default function Create() {
   useEffect(() => {
     const unlisten = appWindow.listen<string>(EVENT_ON_ENTRY_START, (e) => {
       setName(e.payload);
-    });
-    return () => {
-      unlisten.then((it) => it());
-    };
-  }, []);
-
-  useEffect(() => {
-    const unlisten = appWindow.listen<string>(EVENT_ON_SAVE_DIR_PICKED, (e) => {
-      const current = saveDirRef.current;
-      if (current === null) {
-        return;
-      }
-      setSaveSelectOptions([
-        { value: e.payload, display: e.payload, selected: true },
-        ...SPECIAL_SAVE_PLACE.map((it) => {
-          return { selected: false, ...it };
-        }),
-      ]);
     });
     return () => {
       unlisten.then((it) => it());
