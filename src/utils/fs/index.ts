@@ -17,4 +17,4 @@ const readAllIfDir = async (path: string) => {
   }
 };
 
-export { flatEntries, readAllIfDir };
+export { readAllIfDir };
