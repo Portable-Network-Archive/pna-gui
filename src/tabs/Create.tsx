@@ -11,6 +11,7 @@ import Button from "../components/Button";
 import * as Dialog from "../components/Dialog";
 import * as FileList from "../components/FileList";
 import styles from "./Create.module.css";
+import Uncontrolable from "../components/Uncontrolable";
 
 const EVENT_ON_FINISH = "on_finish";
 const EVENT_ON_ENTRY_START = "on_entry_start";
@@ -307,6 +308,7 @@ export default function Create() {
             <span>Create</span>
           </Button>
         </div>
+        {processing && <Uncontrolable></Uncontrolable>}
       </div>
     </div>
   );

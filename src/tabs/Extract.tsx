@@ -6,6 +6,7 @@ import { Cross2Icon } from "@radix-ui/react-icons";
 import Button from "../components/Button";
 import * as Dialog from "../components/Dialog";
 import styles from "./Extract.module.css";
+import Uncontrolable from "../components/Uncontrolable";
 
 const EVENT_ON_START_PROCESS_ENTRY = "extract_processing";
 
@@ -154,6 +155,7 @@ export default function Extract() {
           </h1>
         </div>
       )}
+      {processing && <Uncontrolable />}
     </div>
   );
 }
