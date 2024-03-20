@@ -149,7 +149,7 @@ where
         let option = WriteOption::builder()
             .compression(option.compression.into())
             .encryption(option.encryption.into())
-            .password(option.password.clone())
+            .password(option.password.as_ref())
             .build();
         let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), option)?;
         io::copy(&mut f, &mut entry)?;
