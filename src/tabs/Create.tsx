@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
 import { desktopDir } from "@tauri-apps/api/path";
+import { open } from "@tauri-apps/api/dialog";
 import { readAllIfDir } from "../utils/fs";
 import { CubeIcon, FileIcon, Cross2Icon } from "@radix-ui/react-icons";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -11,7 +12,6 @@ import * as Dialog from "../components/Dialog";
 import * as FileList from "../components/FileList";
 import styles from "./Create.module.css";
 
-const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_SAVE_DIR_PICKED = "on_save_dir_picked";
 const EVENT_ON_FINISH = "on_finish";
 const EVENT_ON_ENTRY_START = "on_entry_start";
@@ -69,11 +69,15 @@ export default function Create() {
     });
   };
 
-  const openFilePicker = () => {
+  const openFilePicker = async () => {
     if (processing) {
       return;
     }
-    invoke("open_files_picker", { event: EVENT_ON_FILE_PICKED });
+    const files = await open({ multiple: true });
+    if (files === null) {
+      return;
+    }
+    await addFiles([files].flat());
   };
 
   const openDirPicker = () => {
@@ -141,15 +145,6 @@ export default function Create() {
   useEffect(() => {
     const unlisten = appWindow.listen<string>(EVENT_ON_ENTRY_START, (e) => {
       setName(e.payload);
-    });
-    return () => {
-      unlisten.then((it) => it());
-    };
-  }, []);
-
-  useEffect(() => {
-    const unlisten = appWindow.listen<string[]>(EVENT_ON_FILE_PICKED, (e) => {
-      addFiles(e.payload);
     });
     return () => {
       unlisten.then((it) => it());
@@ -257,7 +252,7 @@ export default function Create() {
       </div>
       <div className={styles.titleRow}>
         <h1>
-          <span className="clickable" onClick={() => openFilePicker()}>
+          <span className="clickable" onClick={openFilePicker}>
             <b>Drop here to add to Archive</b>
           </span>
         </h1>
