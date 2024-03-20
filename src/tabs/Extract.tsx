@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { appWindow } from "@tauri-apps/api/window";
+import { open } from "@tauri-apps/api/dialog";
 import { Cross2Icon } from "@radix-ui/react-icons";
 import Button from "../components/Button";
 import * as Dialog from "../components/Dialog";
 import styles from "./Extract.module.css";
 
-const EVENT_ON_FILE_PICKED = "on_file_picked";
 const EVENT_ON_START_PROCESS_ENTRY = "extract_processing";
 
 export default function Extract() {
@@ -38,11 +38,24 @@ export default function Extract() {
       });
   };
 
-  const openFilePicker = () => {
+  const openFilePicker = async () => {
     if (processing) {
       return;
     }
-    invoke("open_pna_file_picker", { event: EVENT_ON_FILE_PICKED });
+    const files = await open({
+      filters: [
+        {
+          name: "pna",
+          extensions: ["pna"],
+        },
+      ],
+    });
+    if (files === null) {
+      return;
+    }
+    // NOTE: take first element
+    const file = [files].flat().pop();
+    setArchivePath(file);
   };
 
   useEffect(() => {
@@ -66,15 +79,6 @@ export default function Extract() {
         setName(e.payload);
       },
     );
-    return () => {
-      unlisten.then((it) => it());
-    };
-  }, []);
-
-  useEffect(() => {
-    const unlisten = appWindow.listen<string>(EVENT_ON_FILE_PICKED, (e) => {
-      setArchivePath(e.payload);
-    });
     return () => {
       unlisten.then((it) => it());
     };
@@ -135,7 +139,7 @@ export default function Extract() {
         </Dialog.Root>
       </div>
       <div className="row">
-        <span onClick={() => openFilePicker()}>
+        <span onClick={openFilePicker}>
           <img src="/pna.svg" className="logo vite" alt="PNA logo" />
         </span>
       </div>
@@ -144,7 +148,7 @@ export default function Extract() {
       {!processing && (
         <div className="row">
           <h1>
-            <span className="clickable" onClick={() => openFilePicker()}>
+            <span className="clickable" onClick={openFilePicker}>
               <b>Drop here to extract Archive</b>
             </span>
           </h1>

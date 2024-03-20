@@ -13,18 +13,9 @@ use serde::{Deserialize, Serialize};
 use tauri::MenuEntry;
 #[cfg(not(target_os = "macos"))]
 use tauri::Submenu;
-use tauri::{api::dialog::FileDialogBuilder, CustomMenuItem, Menu, Window};
+use tauri::{CustomMenuItem, Menu, Window};
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-#[tauri::command]
-async fn open_pna_file_picker(window: Window, event: String) {
-    FileDialogBuilder::new()
-        .add_filter("pna", &["pna"])
-        .pick_file(move |path| {
-            path.and_then(|p| window.emit(&event, p).ok());
-        });
-}
-
 #[tauri::command]
 async fn create(
     window: Window,
@@ -256,11 +247,7 @@ fn main() {
                 m => println!("{}", m),
             };
         })
-        .invoke_handler(tauri::generate_handler![
-            create,
-            extract,
-            open_pna_file_picker,
-        ])
+        .invoke_handler(tauri::generate_handler![create, extract,])
         .run(context)
         .expect("error while running tauri application");
 }
