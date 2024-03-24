@@ -1,20 +1,29 @@
+"use client";
 import { useEffect, useState } from "react";
 import { Extract, Create } from "./tabs";
-import { appWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/window";
 import styles from "./App.module.css";
 
 type Mode = "extract" | "create";
 
 function App() {
+  const [appWindow, setAppWindow] = useState<WebviewWindow>();
   const [mode, setMode] = useState<Mode>("extract");
   useEffect(() => {
-    const unlisten = appWindow.listen<Mode>("switch_tab", (e) => {
+    const w = import("@tauri-apps/api/window");
+    w.then((it) => {
+      setAppWindow(it.appWindow);
+    });
+  }, []);
+  useEffect(() => {
+    const unlisten = appWindow?.listen<Mode>("switch_tab", (e) => {
       setMode(e.payload);
+      console.log(e.payload);
     });
     return () => {
-      unlisten.then((it) => it());
+      unlisten?.then((it) => it());
     };
-  }, []);
+  }, [appWindow]);
 
   return (
     <div className={styles.Container}>

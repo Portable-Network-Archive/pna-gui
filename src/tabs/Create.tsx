@@ -1,7 +1,7 @@
+"use client";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
-import { appWindow } from "@tauri-apps/api/window";
-import { desktopDir } from "@tauri-apps/api/path";
+import { WebviewWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/api/dialog";
 import { readAllIfDir } from "../utils/fs";
 import { CubeIcon, FileIcon, Cross2Icon } from "@radix-ui/react-icons";
@@ -37,6 +37,8 @@ const ENCRYPTION = ["none", "aes", "camellia"] as const;
 type Encryption = (typeof ENCRYPTION)[number];
 
 export default function Create() {
+  const [appWindow, setAppWindow] = useState<WebviewWindow>();
+  const [api, setApi] = useState<typeof import("@tauri-apps/api")>();
   const [files, setFiles] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
@@ -53,7 +55,7 @@ export default function Create() {
 
   const setSaveDir = async (value: string) => {
     if (value === VALUE_DESKTOP) {
-      _setSaveDir(await desktopDir());
+      // _setSaveDir(await desktopDir());
     } else {
       _setSaveDir(value);
     }
@@ -132,7 +134,7 @@ export default function Create() {
       entryStartEvent: EVENT_ON_ENTRY_START,
       name: "archive.pna",
       files,
-      saveDir: saveDir || (await desktopDir()),
+      saveDir: saveDir || (await api?.path.desktopDir()),
       option: {
         compression,
         encryption,
@@ -149,38 +151,49 @@ export default function Create() {
   };
 
   useEffect(() => {
-    const unlisten = appWindow.onFileDropEvent((e) => {
+    const w = import("@tauri-apps/api/window");
+    w.then((it) => {
+      setAppWindow(it.appWindow);
+    });
+    const a = import("@tauri-apps/api");
+    a.then((it) => {
+      setApi(it);
+    });
+  }, []);
+
+  useEffect(() => {
+    const unlisten = appWindow?.onFileDropEvent((e) => {
       if (e.payload.type !== "drop") {
         return;
       }
       addFiles(e.payload.paths);
     });
     return () => {
-      unlisten.then((it) => it());
+      unlisten?.then((it) => it());
     };
-  }, []);
+  }, [appWindow]);
 
   useEffect(() => {
-    const unlisten = appWindow.listen<string>(EVENT_ON_ENTRY_START, (e) => {
+    const unlisten = appWindow?.listen<string>(EVENT_ON_ENTRY_START, (e) => {
       setName(e.payload);
     });
     return () => {
-      unlisten.then((it) => it());
+      unlisten?.then((it) => it());
     };
-  }, []);
+  }, [appWindow]);
 
   useEffect(() => {
-    const unlisten = appWindow.listen<string>(EVENT_ON_FINISH, () => {
+    const unlisten = appWindow?.listen<string>(EVENT_ON_FINISH, () => {
       setFiles([]);
     });
     return () => {
-      unlisten.then((it) => it());
+      unlisten?.then((it) => it());
     };
-  }, []);
+  }, [appWindow]);
 
   useEffect(() => {
-    desktopDir().then(setSaveDir);
-  }, []);
+    api?.path.desktopDir().then(setSaveDir);
+  }, [api]);
 
   return (
     <div className={styles.Container}>

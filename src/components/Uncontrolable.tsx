@@ -4,8 +4,10 @@ import styles from "./Uncontrolable.module.css";
 const Uncontrolable = React.forwardRef<
   HTMLDivElement,
   React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div className={`${styles.FullScrean} ${className}`} {...props} ref={ref} />
-));
+>(function Uncontrolable({ className, ...props }, ref) {
+  return (
+    <div className={`${styles.FullScrean} ${className}`} {...props} ref={ref} />
+  );
+});
 
 export default Uncontrolable;
