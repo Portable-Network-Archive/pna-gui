@@ -4,7 +4,7 @@ import { IconProps } from "@radix-ui/react-icons/dist/types";
 import styles from "./ProcessingIcon.module.css";
 
 const ProcessingIcon = React.forwardRef<SVGSVGElement, IconProps>(
-  ({ className, ...props }, ref) => {
+  function ProcessingIcon({ className, ...props }, ref) {
     return (
       <SymbolIcon
         className={`${styles.RotatingElement} ${className}`}

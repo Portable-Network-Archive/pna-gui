@@ -1,6 +1,7 @@
+"use client";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
-import { appWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/api/dialog";
 import { Cross2Icon } from "@radix-ui/react-icons";
 import Button from "../components/Button";
@@ -11,6 +12,7 @@ import Uncontrolable from "../components/Uncontrolable";
 const EVENT_ON_START_PROCESS_ENTRY = "extract_processing";
 
 export default function Extract() {
+  const [appWindow, setAppWindow] = useState<WebviewWindow>();
   const [archivePath, setArchivePath] = useState<string>();
   const [password, setPassword] = useState<string>();
   const [name, setName] = useState("");
@@ -58,9 +60,15 @@ export default function Extract() {
     const file = [files].flat().pop();
     setArchivePath(file);
   };
+  useEffect(() => {
+    const w = import("@tauri-apps/api/window");
+    w.then((it) => {
+      setAppWindow(it.appWindow);
+    });
+  }, []);
 
   useEffect(() => {
-    const unlisten = appWindow.onFileDropEvent((e) => {
+    const unlisten = appWindow?.onFileDropEvent((e) => {
       if (e.payload.type !== "drop") {
         return;
       }
@@ -69,21 +77,21 @@ export default function Extract() {
       }
     });
     return () => {
-      unlisten.then((it) => it());
+      unlisten?.then((it) => it());
     };
-  }, []);
+  }, [appWindow]);
 
   useEffect(() => {
-    const unlisten = appWindow.listen<string>(
+    const unlisten = appWindow?.listen<string>(
       EVENT_ON_START_PROCESS_ENTRY,
       (e) => {
         setName(e.payload);
       },
     );
     return () => {
-      unlisten.then((it) => it());
+      unlisten?.then((it) => it());
     };
-  }, []);
+  }, [appWindow]);
 
   useEffect(() => {
     const path = archivePath;
