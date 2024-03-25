@@ -1,13 +1,8 @@
-.Container {
-  height: 100%;
-  display: grid;
-  grid-template-columns: 8em 1fr;
-}
 .LeftMenuRoot {
   height: 100%;
   display: grid;
   grid-template-rows: auto 2em;
-  background-color: var(--base-color-dark);
+  background-color: var(--accent-3);
 }
 .MenuContainer {
   display: grid;
@@ -15,6 +10,7 @@
   grid-auto-rows: 2em;
 }
 .MenuContainer .Item {
+  padding: 0 2rem;
   display: inline-flex;
   font-weight: bold;
   width: 100%;
@@ -22,14 +18,13 @@
   justify-content: center;
 }
 .MenuContainer .Item.Active {
-  text-shadow: #747bff 1px 0 10px;
-  background-color: var(--base-color);
-  border-left: 2px solid var(--primary-color);
+  text-shadow: var(--accent-9) 1px 0 10px;
+  border-left: 2px solid var(--accent-9);
+  background-color: var(--color-background);
 }
 .MenuContainer .Item.Inactive {
   border-left: 2px solid transparent;
 }
 .MenuContainer .Item.Inactive:hover {
-  text-shadow: #747bff 1px 0 10px;
-  border-left: 2px solid var(--primary-color);
+  border-left: 2px solid var(--accent-9);
 }

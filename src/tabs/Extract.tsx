@@ -3,11 +3,9 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { WebviewWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/api/dialog";
-import { Cross2Icon } from "@radix-ui/react-icons";
-import Button from "../components/Button";
-import * as Dialog from "../components/Dialog";
-import styles from "./Extract.module.css";
 import Uncontrolable from "../components/Uncontrolable";
+import { Flex, Text, Dialog, Button, TextField } from "@radix-ui/themes";
+import Image from "next/image";
 
 const EVENT_ON_START_PROCESS_ENTRY = "extract_processing";
 
@@ -102,68 +100,67 @@ export default function Extract() {
   }, [archivePath, password]);
 
   return (
-    <div className="container">
-      <div className="row">
+    <Flex
+      direction="column"
+      style={{ height: "100vh" }}
+      justify="center"
+      width="100%"
+    >
+      <Flex direction="row">
         <Dialog.Root open={openPasswordDialog}>
-          <Dialog.Trigger asChild></Dialog.Trigger>
-          <Dialog.Portal>
-            <Dialog.Overlay />
-            <Dialog.Content>
-              <Dialog.Title>Input password</Dialog.Title>
-              <Dialog.Description>
-                The archive is encrypted need a password to extract
-              </Dialog.Description>
-              <fieldset className={`${styles.Fieldset}`}>
-                <label className={`${styles.Label}`} htmlFor="password">
+          <Dialog.Content>
+            <Dialog.Title>Input password</Dialog.Title>
+            <Dialog.Description>
+              This archive is encrypted need a password to extract
+            </Dialog.Description>
+            <Flex direction="column">
+              <label htmlFor="password">
+                <Text as="div" size="2" mb="1" weight="bold">
                   Password
-                </label>
-                <input id="password" type="password"></input>
-              </fieldset>
-              <div className={`${styles.ButtonContainer}`}>
-                <Dialog.Close
-                  asChild
-                  onClick={async () => {
-                    setPassword(
-                      (document.getElementById("password") as HTMLInputElement)
-                        .value,
-                    );
-                    setOpenPasswordDialog(false);
-                  }}
-                >
-                  <Button>Extract</Button>
-                </Dialog.Close>
-              </div>
+                </Text>
+                <TextField.Root id="password" type="password" />
+              </label>
+            </Flex>
+            <Flex gap="3" mt="4" justify="end">
               <Dialog.Close
-                asChild
                 onClick={async () => {
+                  setProcessing(false);
                   setOpenPasswordDialog(false);
                 }}
               >
-                <button className={`${styles.IconButton}`} aria-label="Close">
-                  <Cross2Icon />
-                </button>
+                <Button variant="soft" color="gray">
+                  Cancel
+                </Button>
               </Dialog.Close>
-            </Dialog.Content>
-          </Dialog.Portal>
+              <Dialog.Close
+                onClick={async () => {
+                  setPassword(
+                    (document.getElementById("password") as HTMLInputElement)
+                      .value,
+                  );
+                  setOpenPasswordDialog(false);
+                }}
+              >
+                <Button>Extract</Button>
+              </Dialog.Close>
+            </Flex>
+          </Dialog.Content>
         </Dialog.Root>
-      </div>
-      <div className="row">
+      </Flex>
+      <Flex width="100%" align="center" justify="center">
         <span onClick={openFilePicker}>
-          <img src="/pna.svg" className="logo vite" alt="PNA logo" />
+          <Image src="/pna.svg" alt="PNA" width="100" height="100" />
         </span>
-      </div>
-      {processing && <div className="row">Extracting {name} ...</div>}
-
-      {!processing && (
-        <div className="row">
-          <h1>
-            <span className="clickable" onClick={openFilePicker}>
-              <b>Drop here to extract Archive</b>
-            </span>
-          </h1>
-        </div>
-      )}
+      </Flex>
+      <Flex width="100%" align="center" justify="center">
+        {processing && <Text>Extracting {name} ...</Text>}
+        {!processing && (
+          <Text className="clickable" onClick={openFilePicker}>
+            <b>Drop here to extract Archive</b>
+          </Text>
+        )}
+      </Flex>
       {processing && <Uncontrolable />}
-    </div>
+    </Flex>
   );
 }

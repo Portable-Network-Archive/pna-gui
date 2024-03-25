@@ -1,34 +1,29 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { WebviewWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/api/dialog";
 import { readAllIfDir } from "../utils/fs";
-import { CubeIcon, FileIcon, Cross2Icon } from "@radix-ui/react-icons";
-import * as Tooltip from "@radix-ui/react-tooltip";
+import { CubeIcon, FileIcon, GearIcon } from "@radix-ui/react-icons";
 import ProcessingIcon from "../components/ProcessingIcon";
-import Button from "../components/Button";
-import * as Dialog from "../components/Dialog";
-import * as FileList from "../components/FileList";
 import styles from "./Create.module.css";
 import Uncontrolable from "../components/Uncontrolable";
+import {
+  Button,
+  Flex,
+  IconButton,
+  Select,
+  TextField,
+  Dialog,
+  Tooltip,
+  ScrollArea,
+  Table,
+  Text,
+  Grid,
+} from "@radix-ui/themes";
 
 const EVENT_ON_FINISH = "on_finish";
 const EVENT_ON_ENTRY_START = "on_entry_start";
-
-const VALUE_OTHER = "other";
-const VALUE_DESKTOP = "desktop";
-
-const SPECIAL_SAVE_PLACE = [
-  {
-    display: "Desktop",
-    value: VALUE_DESKTOP,
-  },
-  {
-    display: "Other",
-    value: VALUE_OTHER,
-  },
-];
 
 const COMPRESSION = ["none", "zlib", "zstd", "xz"] as const;
 type Compression = (typeof COMPRESSION)[number];
@@ -39,27 +34,14 @@ type Encryption = (typeof ENCRYPTION)[number];
 export default function Create() {
   const [appWindow, setAppWindow] = useState<WebviewWindow>();
   const [api, setApi] = useState<typeof import("@tauri-apps/api")>();
+  const [openSettings, setOpenSettings] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
   const [compression, setCompression] = useState<Compression>("zstd");
   const [encryption, setEncryption] = useState<Encryption>("none");
   const [password, setPassword] = useState<string>("");
-  const [saveSelectOptions, setSaveSelectOptions] = useState(
-    SPECIAL_SAVE_PLACE.map((it) => {
-      return { selected: false, ...it };
-    }),
-  );
-  const [saveDir, _setSaveDir] = useState<string | null>(null);
-  const saveDirRef = useRef<HTMLSelectElement>(null);
-
-  const setSaveDir = async (value: string) => {
-    if (value === VALUE_DESKTOP) {
-      // _setSaveDir(await desktopDir());
-    } else {
-      _setSaveDir(value);
-    }
-  };
+  const [saveDir, setSaveDir] = useState<string | undefined>(undefined);
 
   const addFiles = async (paths: string[]) => {
     let files: string[] = [];
@@ -95,31 +77,7 @@ export default function Create() {
     if (dir === undefined) {
       return;
     }
-    const current = saveDirRef.current;
-    if (current === null) {
-      return;
-    }
-    setSaveSelectOptions([
-      { value: dir, display: dir, selected: true },
-      ...SPECIAL_SAVE_PLACE.map((it) => {
-        return { selected: false, ...it };
-      }),
-    ]);
-  };
-
-  const onSelectSaveDir = async () => {
-    const selected = saveDirRef.current?.selectedOptions;
-    if (selected === undefined || selected.length === 0) {
-      return;
-    }
-    if (selected.item(0)?.value === VALUE_OTHER) {
-      setSaveSelectOptions((old) =>
-        old.map((it) => {
-          return { ...it, selected: false };
-        }),
-      );
-      await openDirPicker();
-    }
+    setSaveDir(dir);
   };
 
   const create = async () => {
@@ -196,133 +154,116 @@ export default function Create() {
   }, [api]);
 
   return (
-    <div className={styles.Container}>
-      <div className={styles.RowFull}>
-        <div className={styles.FilePathBar}>
-          <Dialog.Root>
-            <Tooltip.Root>
-              <Dialog.Trigger asChild>
-                <Tooltip.Trigger asChild>
-                  <FileIcon className={styles.Icon} />
-                </Tooltip.Trigger>
-              </Dialog.Trigger>
-              <Tooltip.Portal>
-                <Tooltip.Content
-                  className={styles.TooltipContent}
-                  side="bottom"
-                  align="start"
-                >
-                  Save path
-                  <Tooltip.Arrow />
-                </Tooltip.Content>
-              </Tooltip.Portal>
-            </Tooltip.Root>
-            <Dialog.Portal>
-              <Dialog.Overlay />
-              <Dialog.Content>
-                <Dialog.Title>Save Path</Dialog.Title>
-                <Dialog.Description>Change to save path.</Dialog.Description>
-                <fieldset className={`${styles.Fieldset}`}>
-                  <label className={`${styles.Label}`} htmlFor="save">
-                    Save to
-                  </label>
-                  <select ref={saveDirRef} id="save" onChange={onSelectSaveDir}>
-                    {saveSelectOptions.map((it) => (
-                      <option
-                        key={it.value}
-                        value={it.value}
-                        selected={it.selected}
-                      >
-                        {it.display}
-                      </option>
-                    ))}
-                  </select>
-                </fieldset>
-                <div className={`${styles.SaveButtonContainer}`}>
-                  <Dialog.Close
-                    asChild
-                    onClick={async () => {
-                      const current = saveDirRef.current;
-                      if (current === null) {
-                        return;
-                      }
-                      setSaveDir(current.value);
-                    }}
-                  >
-                    <Button>Save changes</Button>
-                  </Dialog.Close>
-                </div>
-                <Dialog.Close asChild>
-                  <button className={`${styles.IconButton}`} aria-label="Close">
-                    <Cross2Icon />
-                  </button>
-                </Dialog.Close>
-              </Dialog.Content>
-            </Dialog.Portal>
-          </Dialog.Root>
-          <span className={styles.FilePath}>{saveDir}</span>
-        </div>
-      </div>
-      <div className={styles.titleRow}>
-        <h1>
-          <span className="clickable" onClick={openFilePicker}>
+    <Flex direction="column" height="100%" width="100%" justify="between">
+      <Flex direction="column">
+        <Flex direction="row" width="100%">
+          <TextField.Root
+            defaultValue={saveDir}
+            disabled={true}
+            style={{ width: "100%" }}
+          >
+            <TextField.Slot>
+              <Tooltip content="Save to">
+                <FileIcon onClick={openDirPicker} />
+              </Tooltip>
+            </TextField.Slot>
+          </TextField.Root>
+        </Flex>
+        <Flex direction="row" justify="center" align="center">
+          <Text onClick={openFilePicker}>
             <b>Drop here to add to Archive</b>
-          </span>
-        </h1>
-      </div>
-      <div className={styles.fileListRow}>
-        <FileList.Root className={styles.FileList}>
-          {files.map((it) => (
-            <FileList.Item key={it} className={styles.FileListItem}>
-              {processing && it == name && (
-                <span className={styles.Icon}>
-                  <ProcessingIcon />
-                </span>
-              )}
-              <span>{it}</span>
-            </FileList.Item>
-          ))}
-        </FileList.Root>
-      </div>
-      <div className={`${styles.RowFull} ${styles.OptionsRow}`}>
-        <div>
-          <label htmlFor="compression">Compression</label>
-          <select
-            id="compression"
-            value={compression}
-            onChange={(e) => setCompression(e.target.value as Compression)}
+          </Text>
+        </Flex>
+      </Flex>
+      <ScrollArea style={{ border: "1px solid var(--accent-3)" }}>
+        <Flex direction="row" height="100%" width="100%">
+          <Table.Root
+            className={`${styles.FileList}`}
+            style={{ width: "100%" }}
           >
-            {COMPRESSION.map((it) => (
-              <option key={it} value={it}>
-                {it}
-              </option>
-            ))}
-          </select>
-          <label htmlFor="encryption">Encryption</label>
-          <select
-            id="encryption"
-            value={encryption}
-            onChange={(e) => setEncryption(e.target.value as Encryption)}
-          >
-            {ENCRYPTION.map((it) => (
-              <option key={it}>{it}</option>
-            ))}
-          </select>
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            disabled={encryption === "none"}
-            onChange={(e) => setPassword(e.target.value)}
-          ></input>
-        </div>
+            <Table.Header>
+              <Table.Row>
+                <Table.Cell>Path</Table.Cell>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {files.map((it) => (
+                <Table.Row key={it}>
+                  <Table.Cell>
+                    {processing && it == name && (
+                      <span className={styles.Icon}>
+                        <ProcessingIcon />
+                      </span>
+                    )}
+                    <span>{it}</span>
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table.Root>
+        </Flex>
+      </ScrollArea>
+      <Flex direction="row" justify="end" width="100%">
         <div>
-          <Button icon={<CubeIcon />} onClick={create}>
-            <span>Create</span>
+          <Button onClick={create} disabled={files.length === 0}>
+            <CubeIcon />
+            Create
           </Button>
+          <Dialog.Root open={openSettings}>
+            <Dialog.Trigger>
+              <IconButton onClick={() => setOpenSettings(true)}>
+                <GearIcon />
+              </IconButton>
+            </Dialog.Trigger>
+            <Dialog.Content>
+              <Dialog.Title>Archive options</Dialog.Title>
+              <Flex direction="column" gap="2">
+                <label htmlFor="compression">Compression</label>
+                <Select.Root
+                  defaultValue={compression}
+                  onValueChange={(e) => setCompression(e as Compression)}
+                >
+                  <Select.Trigger />
+                  <Select.Content id="compression">
+                    {COMPRESSION.map((it) => (
+                      <Select.Item key={it} value={it}>
+                        {it}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+                <label htmlFor="encryption">Encryption</label>
+                <Select.Root
+                  defaultValue={encryption}
+                  onValueChange={(e) => setEncryption(e as Encryption)}
+                >
+                  <Select.Trigger />
+                  <Select.Content id="encryption">
+                    {ENCRYPTION.map((it) => (
+                      <Select.Item key={it} value={it}>
+                        {it}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+                <label htmlFor="password">Password</label>
+                <TextField.Root
+                  id="password"
+                  type="password"
+                  disabled={encryption === "none"}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </Flex>
+              <Flex mt="4" justify="end">
+                <Dialog.Close>
+                  <Button onClick={() => setOpenSettings(false)}>Apply</Button>
+                </Dialog.Close>
+              </Flex>
+            </Dialog.Content>
+          </Dialog.Root>
         </div>
         {processing && <Uncontrolable></Uncontrolable>}
-      </div>
-    </div>
+      </Flex>
+    </Flex>
   );
 }
