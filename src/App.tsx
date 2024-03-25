@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Extract, Create } from "./tabs";
 import { WebviewWindow } from "@tauri-apps/api/window";
 import styles from "./App.module.css";
+import { Text, Flex } from "@radix-ui/themes";
 
 type Mode = "extract" | "create";
 
@@ -26,31 +27,35 @@ function App() {
   }, [appWindow]);
 
   return (
-    <div className={styles.Container}>
-      <div className={styles.LeftMenuRoot}>
-        <div className={styles.MenuContainer}>
-          <span
-            className={`${styles.Item} ${
-              mode === "extract" ? styles.Active : styles.Inactive
-            }`}
-            onClick={() => setMode("extract")}
-          >
-            Extract
-          </span>
-          <span
-            className={`${styles.Item} ${
-              mode === "create" ? styles.Active : styles.Inactive
-            }`}
-            onClick={() => setMode("create")}
-          >
-            Create
-          </span>
+    <Flex direction="row" width="100%" height="100%">
+      <Flex direction="column">
+        <div className={styles.LeftMenuRoot}>
+          <div className={styles.MenuContainer}>
+            <span
+              className={`${styles.Item} ${
+                mode === "extract" ? styles.Active : styles.Inactive
+              }`}
+              onClick={() => setMode("extract")}
+            >
+              <Text>Extract</Text>
+            </span>
+            <span
+              className={`${styles.Item} ${
+                mode === "create" ? styles.Active : styles.Inactive
+              }`}
+              onClick={() => setMode("create")}
+            >
+              <Text>Create</Text>
+            </span>
+          </div>
+          <div></div>
         </div>
-        <div></div>
-      </div>
-      {mode === "extract" && <Extract />}
-      {mode === "create" && <Create />}
-    </div>
+      </Flex>
+      <Flex width="100%" height="100%" p="2">
+        {mode === "extract" && <Extract />}
+        {mode === "create" && <Create />}
+      </Flex>
+    </Flex>
   );
 }
 
