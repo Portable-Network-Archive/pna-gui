@@ -4,7 +4,14 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { WebviewWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/api/dialog";
 import Uncontrolable from "../components/Uncontrolable";
-import { Flex, Text, Dialog, Button, TextField } from "@radix-ui/themes";
+import {
+  Flex,
+  Text,
+  Dialog,
+  Button,
+  TextField,
+  Spinner,
+} from "@radix-ui/themes";
 import Image from "next/image";
 
 const EVENT_ON_START_PROCESS_ENTRY = "extract_processing";
@@ -153,7 +160,12 @@ export default function Extract() {
         </span>
       </Flex>
       <Flex width="100%" align="center" justify="center">
-        {processing && <Text>Extracting {name} ...</Text>}
+        {processing && (
+          <>
+            <Spinner />
+            <Text>Extracting {name} ...</Text>
+          </>
+        )}
         {!processing && (
           <Text className="clickable" onClick={openFilePicker}>
             <b>Drop here to extract Archive</b>

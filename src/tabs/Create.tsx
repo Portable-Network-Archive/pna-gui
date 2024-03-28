@@ -20,6 +20,7 @@ import {
   Table,
   Text,
   Grid,
+  Spinner,
 } from "@radix-ui/themes";
 
 const EVENT_ON_FINISH = "on_finish";
@@ -200,13 +201,18 @@ export default function Create() {
       </ScrollArea>
       <Flex direction="row" justify="end" width="100%">
         <div>
-          <Button onClick={create} disabled={files.length === 0}>
-            <CubeIcon />
+          <Button onClick={create} disabled={files.length === 0 || processing}>
+            <Spinner loading={processing}>
+              <CubeIcon />
+            </Spinner>
             Create
           </Button>
           <Dialog.Root open={openSettings}>
             <Dialog.Trigger>
-              <IconButton onClick={() => setOpenSettings(true)}>
+              <IconButton
+                onClick={() => setOpenSettings(true)}
+                disabled={processing}
+              >
                 <GearIcon />
               </IconButton>
             </Dialog.Trigger>
