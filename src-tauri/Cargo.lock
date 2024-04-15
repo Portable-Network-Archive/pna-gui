@@ -286,6 +286,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "camino"
+version = "1.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c59e92b5a388f549b863a7bea62612c09f24c8393560709a54558a9abdfb3b9c"
+
+[[package]]
 name = "cargo_toml"
 version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1633,18 +1639,18 @@ checksum = "302d7ab3130588088d277783b1e2d2e10c9e9e4a16dd9050e6ec93fb3e7048f4"
 
 [[package]]
 name = "liblzma"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4a85763908276cd4526fe29677e85cf4945bb15f59d91312db61bfe88294e18"
+checksum = "717c314a016664dec8c5b42f72dce3b23bc42b0399b712604c816d4f528ec99a"
 dependencies = [
  "liblzma-sys",
 ]
 
 [[package]]
 name = "liblzma-sys"
-version = "0.3.0"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac1124ae12ab2748227b1302133d48a752c5f92340d85a28a53cee3d71b2c86b"
+checksum = "2897528b23db157f02481ed7dd11d05421885fd5b5b4020c5ddb95bef6d47b4a"
 dependencies = [
  "cc",
  "libc",
@@ -1653,13 +1659,14 @@ dependencies = [
 
 [[package]]
 name = "libpna"
-version = "0.8.2"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf0c61f507c795a9f91e570c08a1f98f3afbaf96f83204f4ffa55d731496c7ae"
+checksum = "fd052fb99223849e63dc198782f004fe7f9a8705580bbb8fcf3ab5aacebc4bcd"
 dependencies = [
  "aes",
  "argon2",
  "camellia",
+ "camino",
  "cbc",
  "cipher",
  "crc32fast",
