@@ -19,8 +19,8 @@ import {
   ScrollArea,
   Table,
   Text,
-  Grid,
   Spinner,
+  Checkbox,
 } from "@radix-ui/themes";
 
 const EVENT_ON_FINISH = "on_finish";
@@ -42,6 +42,7 @@ export default function Create() {
   const [compression, setCompression] = useState<Compression>("zstd");
   const [encryption, setEncryption] = useState<Encryption>("none");
   const [password, setPassword] = useState<string>("");
+  const [solidMode, setSolidMode] = useState(false);
   const [saveDir, setSaveDir] = useState<string | undefined>(undefined);
 
   const addFiles = async (paths: string[]) => {
@@ -95,6 +96,7 @@ export default function Create() {
       files,
       saveDir: saveDir || (await api?.path.desktopDir()),
       option: {
+        solid: solidMode,
         compression,
         encryption,
         password: password.length === 0 ? null : password,
@@ -254,6 +256,20 @@ export default function Create() {
                   disabled={encryption === "none"}
                   onChange={(e) => setPassword(e.target.value)}
                 />
+                <Text as="label" size="2">
+                  <Flex gap="2">
+                    <Checkbox
+                      defaultChecked={solidMode}
+                      onCheckedChange={(state) => {
+                        if (state === "indeterminate") {
+                          return;
+                        }
+                        setSolidMode(state);
+                      }}
+                    />
+                    Solid mode
+                  </Flex>
+                </Text>
               </Flex>
               <Flex mt="4" justify="end">
                 <Dialog.Close>
