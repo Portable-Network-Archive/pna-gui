@@ -121,6 +121,7 @@ impl From<Encryption> for libpna::Encryption {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct PnaOption {
+    solid: bool,
     compression: Compression,
     encryption: Encryption,
     password: Option<String>,
@@ -139,6 +140,38 @@ where
     OnChangeEntry: Fn(Event, &Path),
 {
     fs::create_dir_all(save_dir)?;
+    if option.solid {
+        _create_solid(
+            name,
+            files,
+            save_dir,
+            option,
+            on_change_archive,
+            on_change_entry,
+        )
+    } else {
+        _create_regular(
+            name,
+            files,
+            save_dir,
+            option,
+            on_change_archive,
+            on_change_entry,
+        )
+    }
+}
+fn _create_regular<OnChangeArchive, OnChangeEntry>(
+    name: &str,
+    files: Vec<PathBuf>,
+    save_dir: &Path,
+    option: PnaOption,
+    on_change_archive: OnChangeArchive,
+    on_change_entry: OnChangeEntry,
+) -> io::Result<()>
+where
+    OnChangeArchive: Fn(Event, &Path),
+    OnChangeEntry: Fn(Event, &Path),
+{
     let archive_file_path = save_dir.join(name);
     on_change_archive(Event::Start, &archive_file_path);
     let archive_file = fs::File::create(&archive_file_path)?;
@@ -152,6 +185,40 @@ where
             .password(option.password.as_ref())
             .build();
         let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), option)?;
+        io::copy(&mut f, &mut entry)?;
+        archive.add_entry(entry.build()?)?;
+        on_change_entry(Event::Finish, file.as_ref());
+    }
+    archive.finalize()?;
+    on_change_archive(Event::Finish, &archive_file_path);
+    Ok(())
+}
+
+fn _create_solid<OnChangeArchive, OnChangeEntry>(
+    name: &str,
+    files: Vec<PathBuf>,
+    save_dir: &Path,
+    option: PnaOption,
+    on_change_archive: OnChangeArchive,
+    on_change_entry: OnChangeEntry,
+) -> io::Result<()>
+where
+    OnChangeArchive: Fn(Event, &Path),
+    OnChangeEntry: Fn(Event, &Path),
+{
+    let archive_file_path = save_dir.join(name);
+    on_change_archive(Event::Start, &archive_file_path);
+    let archive_file = fs::File::create(&archive_file_path)?;
+    let option = WriteOption::builder()
+        .compression(option.compression.into())
+        .encryption(option.encryption.into())
+        .password(option.password.as_ref())
+        .build();
+    let mut archive = Archive::write_solid_header(archive_file, option)?;
+    for file in files.iter() {
+        on_change_entry(Event::Start, file.as_ref());
+        let mut f = fs::File::open(file)?;
+        let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), WriteOption::store())?;
         io::copy(&mut f, &mut entry)?;
         archive.add_entry(entry.build()?)?;
         on_change_entry(Event::Finish, file.as_ref());
