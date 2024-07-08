@@ -17,7 +17,7 @@ tauri = { version = "1.6.8", features = [ "macos-private-api", "fs-all", "path-a
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 libpna = "0.13.0"
-open = "5.1.4"
+open = "5.2.0"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
