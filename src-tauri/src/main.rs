@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use libpna::{Archive, EntryBuilder, EntryName, WriteOption};
+use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use tauri::MenuEntry;
@@ -179,7 +179,7 @@ where
     for file in files.iter() {
         on_change_entry(Event::Start, file.as_ref());
         let mut f = fs::File::open(file)?;
-        let option = WriteOption::builder()
+        let option = WriteOptions::builder()
             .compression(option.compression.into())
             .encryption(option.encryption.into())
             .password(option.password.as_ref())
@@ -209,7 +209,7 @@ where
     let archive_file_path = save_dir.join(name);
     on_change_archive(Event::Start, &archive_file_path);
     let archive_file = fs::File::create(&archive_file_path)?;
-    let option = WriteOption::builder()
+    let option = WriteOptions::builder()
         .compression(option.compression.into())
         .encryption(option.encryption.into())
         .password(option.password.as_ref())
@@ -218,7 +218,7 @@ where
     for file in files.iter() {
         on_change_entry(Event::Start, file.as_ref());
         let mut f = fs::File::open(file)?;
-        let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), WriteOption::store())?;
+        let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), WriteOptions::store())?;
         io::copy(&mut f, &mut entry)?;
         archive.add_entry(entry.build()?)?;
         on_change_entry(Event::Finish, file.as_ref());
@@ -259,7 +259,7 @@ where
             fs::create_dir_all(parent)?;
         }
         let mut writer = fs::File::create(out_path)?;
-        let mut reader = entry.reader(libpna::ReadOption::with_password(password))?;
+        let mut reader = entry.reader(libpna::ReadOptions::with_password(password))?;
         io::copy(&mut reader, &mut writer)?;
         on_change_entry(Event::Finish, name);
     }
