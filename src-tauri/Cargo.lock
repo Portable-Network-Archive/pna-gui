@@ -1665,9 +1665,9 @@ dependencies = [
 
 [[package]]
 name = "libpna"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6cc4c309c2a87d4aa88c1b5f10dbd1311429d69654f8f6fbc46fcc984a8c95b"
+checksum = "cd5bebc1ca7f2a74871654aa1553008c6f34212b1ed1687982755a21c50020d1"
 dependencies = [
  "aes",
  "argon2",
@@ -4483,9 +4483,9 @@ dependencies = [
 
 [[package]]
 name = "zstd"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d789b1514203a1120ad2429eae43a7bd32b90976a7bb8a05f7ec02fa88cc23a"
+checksum = "fcf2b778a664581e31e389454a7072dab1647606d44f7feea22cd5abb9c9f3f9"
 dependencies = [
  "zstd-safe",
 ]
