@@ -1645,9 +1645,9 @@ checksum = "302d7ab3130588088d277783b1e2d2e10c9e9e4a16dd9050e6ec93fb3e7048f4"
 
 [[package]]
 name = "liblzma"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "243510a5543c358949902b9e76daec3a32d7b03a43abce823e7c62a1a8360172"
+checksum = "b3139da5a723df5ecc87bea4f09c5622b0f6e40a1448c839aefa56727834491d"
 dependencies = [
  "liblzma-sys",
 ]
@@ -1665,9 +1665,9 @@ dependencies = [
 
 [[package]]
 name = "libpna"
-version = "0.14.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6cc4c309c2a87d4aa88c1b5f10dbd1311429d69654f8f6fbc46fcc984a8c95b"
+checksum = "6205e2cfd0196291f285a13f8250107cf49a6fe817216257f268aa4491bed24a"
 dependencies = [
  "aes",
  "argon2",
@@ -4491,9 +4491,9 @@ dependencies = [
 
 [[package]]
 name = "zstd"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d789b1514203a1120ad2429eae43a7bd32b90976a7bb8a05f7ec02fa88cc23a"
+checksum = "fcf2b778a664581e31e389454a7072dab1647606d44f7feea22cd5abb9c9f3f9"
 dependencies = [
  "zstd-safe",
 ]
