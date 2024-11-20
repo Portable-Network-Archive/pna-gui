@@ -810,9 +810,9 @@ dependencies = [
 
 [[package]]
 name = "flate2"
-version = "1.0.34"
+version = "1.0.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1b589b4dc103969ad3cf85c950899926ec64300a1a46d76c03a6072957036f0"
+checksum = "c936bfdafb507ebbf50b8074c54fa31c5be9a1e7e5f467dd659697041407d07c"
 dependencies = [
  "crc32fast",
  "miniz_oxide 0.8.0",
@@ -1677,9 +1677,9 @@ checksum = "302d7ab3130588088d277783b1e2d2e10c9e9e4a16dd9050e6ec93fb3e7048f4"
 
 [[package]]
 name = "liblzma"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7c45fc6fcf5b527d3cf89c1dee8c327943984b0dc8bfcf6e100473b00969e63"
+checksum = "603222e049bf0da71529325ada5d02dc3871cbd3679cf905429f7f0de93da87b"
 dependencies = [
  "liblzma-sys",
 ]
@@ -1697,9 +1697,9 @@ dependencies = [
 
 [[package]]
 name = "libpna"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "938b42f6e90a6f81397964d5050e097cf9879c699f3560bbefb0cf97f041af65"
+checksum = "11c84d94abefed80f9c43bc8ea13b88c2c03c6acd9467fcf5792b45d9c4a9fb1"
 dependencies = [
  "aes",
  "argon2",
@@ -1716,6 +1716,7 @@ dependencies = [
  "password-hash",
  "pbkdf2",
  "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "zstd",
 ]
 
