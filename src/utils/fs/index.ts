@@ -1,4 +1,4 @@
-import { FileEntry, readDir } from "@tauri-apps/api/fs";
+import { FileEntry, readDir } from "@tauri-apps/plugin-fs";
 
 const flatEntries = (entry: FileEntry): string[] =>
   (entry.children && entry.children.map((it) => flatEntries(it)).flat()) || [

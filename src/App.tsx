@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Extract, Create } from "./tabs";
-import { WebviewWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import styles from "./App.module.css";
 import { Text, Flex } from "@radix-ui/themes";
 
