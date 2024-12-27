@@ -11,9 +11,9 @@ function App() {
   const [appWindow, setAppWindow] = useState<WebviewWindow>();
   const [mode, setMode] = useState<Mode>("extract");
   useEffect(() => {
-    const w = import("@tauri-apps/api/window");
+    const w = import("@tauri-apps/api/webviewWindow");
     w.then((it) => {
-      setAppWindow(it.appWindow);
+      setAppWindow(it.getCurrentWebviewWindow());
     });
   }, []);
   useEffect(() => {

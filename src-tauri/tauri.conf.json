@@ -33,6 +33,11 @@
     }
   },
   "app": {
+    "trayIcon": {
+      "iconAsTemplate": false,
+      "iconPath": "icons/icon.ico",
+      "menuOnLeftClick": true
+    },
     "macOSPrivateApi": true,
     "security": {
       "csp": null

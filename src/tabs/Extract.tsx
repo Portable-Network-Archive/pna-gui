@@ -66,14 +66,14 @@ export default function Extract() {
     setArchivePath(file);
   };
   useEffect(() => {
-    const w = import("@tauri-apps/api/window");
+    const w = import("@tauri-apps/api/webviewWindow");
     w.then((it) => {
-      setAppWindow(it.appWindow);
+      setAppWindow(it.getCurrentWebviewWindow());
     });
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow?.onFileDropEvent((e) => {
+    const unlisten = appWindow?.onDragDropEvent((e) => {
       if (e.payload.type !== "drop") {
         return;
       }

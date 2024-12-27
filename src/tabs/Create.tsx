@@ -112,9 +112,9 @@ export default function Create() {
   };
 
   useEffect(() => {
-    const w = import("@tauri-apps/api/window");
+    const w = import("@tauri-apps/api/webviewWindow");
     w.then((it) => {
-      setAppWindow(it.appWindow);
+      setAppWindow(it.getCurrentWebviewWindow());
     });
     const a = import("@tauri-apps/api");
     a.then((it) => {
@@ -123,7 +123,7 @@ export default function Create() {
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow?.onFileDropEvent((e) => {
+    const unlisten = appWindow?.onDragDropEvent((e) => {
       if (e.payload.type !== "drop") {
         return;
       }

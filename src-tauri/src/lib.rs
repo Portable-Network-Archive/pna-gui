@@ -9,11 +9,10 @@ use std::{
 
 use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
 use serde::{Deserialize, Serialize};
-#[cfg(target_os = "macos")]
-use tauri::MenuEntry;
-#[cfg(not(target_os = "macos"))]
-use tauri::Submenu;
-use tauri::{CustomMenuItem, Menu, Window};
+use tauri::{
+    menu::{MenuBuilder, MenuItem},
+    Emitter, Window,
+};
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
@@ -274,50 +273,66 @@ const MENU_CREATE_TAB: &str = "create tab";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
-    let mut menu = Menu::os_default(&context.package_info().name);
-    let update_check = CustomMenuItem::new(MENU_UPDATE_CHECK, "Check for updates...");
-    let extract_tab = CustomMenuItem::new(MENU_EXTRACT_TAB, "Extract");
-    let create_tab = CustomMenuItem::new(MENU_CREATE_TAB, "Create");
-    #[cfg(target_os = "macos")]
-    if let MenuEntry::Submenu(sub_menu) = &mut menu.items[0] {
-        let items = &mut sub_menu.inner.items;
-        items.insert(1, MenuEntry::CustomItem(update_check));
-    }
-    #[cfg(target_os = "macos")]
-    if let MenuEntry::Submenu(sub_menu) = &mut menu.items[3] {
-        let items = &mut sub_menu.inner.items;
-        items.insert(0, MenuEntry::CustomItem(extract_tab.accelerator("Cmd+1")));
-        items.insert(1, MenuEntry::CustomItem(create_tab.accelerator("Cmd+2")));
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        menu = menu.add_submenu(Submenu::new("Tools", Menu::new().add_item(update_check)));
-        menu = menu.add_item(extract_tab.accelerator("Ctrl+1"));
-        menu = menu.add_item(create_tab.accelerator("Ctrl+2"));
-    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .menu(menu)
-        .on_menu_event(|event| {
-            match event.menu_item_id() {
-                MENU_UPDATE_CHECK => {
-                    event
-                        .window()
-                        .emit_and_trigger("tauri://update", ())
-                        .unwrap();
-                }
-                MENU_EXTRACT_TAB => {
-                    event.window().emit("switch_tab", "extract").unwrap();
-                }
-                MENU_CREATE_TAB => {
-                    event.window().emit("switch_tab", "create").unwrap();
-                }
-                m => println!("{}", m),
-            };
+        .setup(|app| {
+            let update_check = MenuItem::with_id(
+                app,
+                MENU_UPDATE_CHECK,
+                "Check for updates...",
+                true,
+                None::<&str>,
+            )?;
+            let extract_tab = MenuItem::with_id(
+                app,
+                MENU_EXTRACT_TAB,
+                "Extract",
+                true,
+                Some(if cfg!(target_os = "macos") {
+                    "Cmd+1"
+                } else {
+                    "Ctrl+1"
+                }),
+            )?;
+            let create_tab = MenuItem::with_id(
+                app,
+                MENU_CREATE_TAB,
+                "Create",
+                true,
+                Some(if cfg!(target_os = "macos") {
+                    "Cmd+2"
+                } else {
+                    "Ctrl+2"
+                }),
+            )?;
+
+            let menu = MenuBuilder::new(app)
+                .close_window()
+                .items(&[&update_check, &extract_tab, &create_tab])
+                .build()?;
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .menu(&menu)
+                .on_menu_event(|handle, event| {
+                    match event.id().as_ref() {
+                        MENU_UPDATE_CHECK => {
+                            handle.emit("tauri://update", ()).unwrap();
+                        }
+                        MENU_EXTRACT_TAB => {
+                            handle.emit("switch_tab", "extract").unwrap();
+                        }
+                        MENU_CREATE_TAB => {
+                            handle.emit("switch_tab", "create").unwrap();
+                        }
+                        m => println!("{}", m),
+                    };
+                })
+                .menu_on_left_click(true)
+                .build(app)?;
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![create, extract,])
         .run(context)
