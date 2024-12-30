@@ -15,6 +15,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "fileAssociations": [
+      {
+        "ext": [".pna"],
+        "name": "Portable Network Archive",
+        "description": "Portable Network Archive",
+        "role": "Editor"
+      }
+    ],
     "createUpdaterArtifacts": "v1Compatible"
   },
   "productName": "Portable Network Archive",
