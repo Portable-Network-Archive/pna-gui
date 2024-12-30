@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Extract, Create } from "./tabs";
-import { WebviewWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import styles from "./App.module.css";
 import { Text, Flex } from "@radix-ui/themes";
 
@@ -11,9 +11,9 @@ function App() {
   const [appWindow, setAppWindow] = useState<WebviewWindow>();
   const [mode, setMode] = useState<Mode>("extract");
   useEffect(() => {
-    const w = import("@tauri-apps/api/window");
+    const w = import("@tauri-apps/api/webviewWindow");
     w.then((it) => {
-      setAppWindow(it.appWindow);
+      setAppWindow(it.getCurrentWebviewWindow());
     });
   }, []);
   useEffect(() => {

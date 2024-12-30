@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
-import { WebviewWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/api/dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { open } from "@tauri-apps/plugin-dialog";
 import Uncontrolable from "../components/Uncontrolable";
 import {
   Flex,
@@ -66,14 +66,14 @@ export default function Extract() {
     setArchivePath(file);
   };
   useEffect(() => {
-    const w = import("@tauri-apps/api/window");
+    const w = import("@tauri-apps/api/webviewWindow");
     w.then((it) => {
-      setAppWindow(it.appWindow);
+      setAppWindow(it.getCurrentWebviewWindow());
     });
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow?.onFileDropEvent((e) => {
+    const unlisten = appWindow?.onDragDropEvent((e) => {
       if (e.payload.type !== "drop") {
         return;
       }

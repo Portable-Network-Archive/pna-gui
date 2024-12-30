@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
-import { WebviewWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/api/dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { open } from "@tauri-apps/plugin-dialog";
 import { readAllIfDir } from "../utils/fs";
 import { CubeIcon, FileIcon, GearIcon } from "@radix-ui/react-icons";
 import ProcessingIcon from "../components/ProcessingIcon";
@@ -112,9 +112,9 @@ export default function Create() {
   };
 
   useEffect(() => {
-    const w = import("@tauri-apps/api/window");
+    const w = import("@tauri-apps/api/webviewWindow");
     w.then((it) => {
-      setAppWindow(it.appWindow);
+      setAppWindow(it.getCurrentWebviewWindow());
     });
     const a = import("@tauri-apps/api");
     a.then((it) => {
@@ -123,7 +123,7 @@ export default function Create() {
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow?.onFileDropEvent((e) => {
+    const unlisten = appWindow?.onDragDropEvent((e) => {
       if (e.payload.type !== "drop") {
         return;
       }
