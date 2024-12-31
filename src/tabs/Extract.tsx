@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getMatches } from "@tauri-apps/plugin-cli";
 import Uncontrolable from "../components/Uncontrolable";
 import {
   Flex,
@@ -69,6 +70,25 @@ export default function Extract() {
     const w = import("@tauri-apps/api/webviewWindow");
     w.then((it) => {
       setAppWindow(it.getCurrentWebviewWindow());
+    });
+    getMatches().then((matches) => {
+      const source = matches.args["source"];
+      const value = source.value;
+      console.info(source);
+      switch (true) {
+        case typeof value === "string":
+          console.info(value);
+          setArchivePath(value);
+          break;
+        case value instanceof Array:
+          for (const path of value) {
+            console.info(value);
+            setArchivePath(path);
+          }
+          break;
+        default:
+          console.warn("missing catch case", typeof value);
+      }
     });
   }, []);
 
