@@ -2119,9 +2119,9 @@ dependencies = [
 
 [[package]]
 name = "libpna"
-version = "0.21.1"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8dac0d7c803778f2a07422e07ca8bb3fe28b2d5cddd12d30152035862901e70"
+checksum = "771c2dee001a19b878ce45f40aba1c0c7f379146616b40b6cd23b5b887246b47"
 dependencies = [
  "aes",
  "argon2",
