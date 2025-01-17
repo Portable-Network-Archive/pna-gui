@@ -331,7 +331,7 @@ pub fn run() {
                         m => println!("{}", m),
                     };
                 })
-                .menu_on_left_click(true)
+                .show_menu_on_left_click(true)
                 .build(app)?;
             Ok(())
         })
