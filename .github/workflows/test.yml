@@ -11,6 +11,9 @@ jobs:
       fail-fast: false
       matrix:
         platform: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -31,6 +34,6 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         with:
           tauriScript: 'npm run tauri'
-          args: "--no-bundle"
+          args: "--no-bundle ${{ matrix.args }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
