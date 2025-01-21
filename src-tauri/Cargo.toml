@@ -1,6 +1,6 @@
 [package]
 name = "pna-gui"
-version = "0.1.0"
+version = "0.1.1"
 description = "Portable-Network-Archive GUI"
 authors = ["Portable-Network-Archive Developers"]
 license = "MIT"
