@@ -144,6 +144,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrayvec"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
 name = "ashpd"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2119,12 +2125,13 @@ dependencies = [
 
 [[package]]
 name = "libpna"
-version = "0.21.3"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "771c2dee001a19b878ce45f40aba1c0c7f379146616b40b6cd23b5b887246b47"
+checksum = "ace0e7e8cff7fbd81cc4cf935b2b0c79ef1740fbd935b783f57641542558b565"
 dependencies = [
  "aes",
  "argon2",
+ "arrayvec",
  "camellia",
  "camino",
  "cbc",
