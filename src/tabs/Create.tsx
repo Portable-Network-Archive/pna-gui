@@ -157,26 +157,30 @@ export default function Create() {
   }, [api]);
 
   return (
-    <Flex direction="column" height="100%" width="100%" justify="between">
-      <Flex direction="column">
-        <Flex direction="row" width="100%">
-          <TextField.Root
-            defaultValue={saveDir}
-            disabled={true}
-            style={{ width: "100%" }}
-          >
-            <TextField.Slot>
-              <Tooltip content="Save to">
-                <FileIcon onClick={openDirPicker} />
-              </Tooltip>
-            </TextField.Slot>
-          </TextField.Root>
-        </Flex>
-        <Flex direction="row" justify="center" align="center">
-          <Text onClick={openFilePicker}>
-            <b>Drop here to add to Archive</b>
-          </Text>
-        </Flex>
+    <Flex
+      direction="column"
+      height="100%"
+      width="100%"
+      justify="between"
+      className={styles["ContentRoot"]}
+    >
+      <Flex direction="row" width="100%">
+        <TextField.Root
+          defaultValue={saveDir}
+          disabled={true}
+          style={{ width: "100%" }}
+        >
+          <TextField.Slot>
+            <Tooltip content="Save to">
+              <FileIcon onClick={openDirPicker} />
+            </Tooltip>
+          </TextField.Slot>
+        </TextField.Root>
+      </Flex>
+      <Flex direction="row" justify="center" align="center">
+        <Text onClick={openFilePicker}>
+          <b>Drop here to add to Archive</b>
+        </Text>
       </Flex>
       <ScrollArea style={{ border: "1px solid var(--accent-3)" }}>
         <Flex direction="row" height="100%" width="100%">
