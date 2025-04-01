@@ -54,7 +54,7 @@
     "trayIcon": {
       "iconAsTemplate": false,
       "iconPath": "icons/icon.ico",
-      "menuOnLeftClick": true
+      "showMenuOnLeftClick": true
     },
     "macOSPrivateApi": true,
     "security": {
