@@ -2,3 +2,12 @@
   --table-cell-padding: 6px;
   --table-cell-min-height: 0px;
 }
+.ContentRoot > * {
+  margin: calc(var(--space-2) / 2) 0;
+}
+.ContentRoot > *:first-child {
+  margin: 0 0 calc(var(--space-2) / 2);
+}
+.ContentRoot > *:last-child {
+  margin: calc(var(--space-2) / 2) 0 0;
+}
