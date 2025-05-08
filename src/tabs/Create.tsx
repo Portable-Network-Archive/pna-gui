@@ -223,7 +223,7 @@ export default function Create() {
               </IconButton>
             </Dialog.Trigger>
             <Dialog.Content>
-              <Dialog.Title>Archive options</Dialog.Title>
+              <Dialog.Title>Archive creation options</Dialog.Title>
               <Flex direction="column" gap="2">
                 <label htmlFor="compression">Compression</label>
                 <Select.Root
