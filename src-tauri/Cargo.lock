@@ -4197,9 +4197,9 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-cli"
-version = "2.2.0"
+version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5458ae16eac81bdbe8d9da2a9f3e01e8cdedbc381cc1727c01127542c8a61c5"
+checksum = "096abcf7c913b19f9f26f6a3a1d48b84e46b0274d6b6d164dcaa753f0d7a5700"
 dependencies = [
  "clap",
  "log",
