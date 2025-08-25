@@ -10,7 +10,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-latest, ubuntu-24.04-arm, windows-latest]
+        platform: 
+          - macos-latest
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - windows-latest
+          - windows-11-arm
         include:
           - platform: macos-latest
             args: "--target universal-apple-darwin"
