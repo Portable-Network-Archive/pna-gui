@@ -27,7 +27,7 @@
   },
   "productName": "Portable Network Archive",
   "mainBinaryName": "Portable Network Archive",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.github.portable-network-archive.gui",
   "plugins": {
     "cli": {
