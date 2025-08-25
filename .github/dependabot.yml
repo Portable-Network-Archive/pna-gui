@@ -17,3 +17,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      react-packages:
+        patterns:
+          - "react"
+          - "react-dom"
