@@ -1,0 +1,62 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.dropZone {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--gray-a5);
+  border-radius: 12px;
+  gap: 16px;
+  cursor: default;
+  transition: border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.dropZone:hover {
+  border-color: var(--accent-7);
+  background-color: var(--accent-a2);
+}
+
+.icon {
+  opacity: 0.8;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.dropZone:hover .icon {
+  opacity: 1;
+  transform: scale(1.05);
+}
+
+.hint {
+  color: var(--gray-a9);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.subHint {
+  color: var(--gray-a7);
+  font-size: 12px;
+}
+
+.processingInfo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.processingName {
+  color: var(--gray-a8);
+  font-size: 12px;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

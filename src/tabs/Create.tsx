@@ -15,9 +15,6 @@ import {
   Select,
   TextField,
   Dialog,
-  Tooltip,
-  ScrollArea,
-  Table,
   Text,
   Spinner,
   Checkbox,
@@ -50,35 +47,22 @@ export default function Create() {
     for (const path of paths) {
       files.push(...(await readAllIfDir(path)));
     }
-    setFiles((current) => {
-      return [...current, ...files];
-    });
+    setFiles((current) => [...current, ...files]);
   };
 
   const openFilePicker = async () => {
-    if (processing) {
-      return;
-    }
+    if (processing) return;
     const files = await open({ multiple: true });
-    if (files === null) {
-      return;
-    }
+    if (files === null) return;
     await addFiles([files].flat());
   };
 
   const openDirPicker = async () => {
-    if (processing) {
-      return;
-    }
+    if (processing) return;
     const dirs = await open({ directory: true });
-    if (dirs === null) {
-      return;
-    }
-    // NOTE: take first element
+    if (dirs === null) return;
     const dir = [dirs].flat().pop();
-    if (dir === undefined) {
-      return;
-    }
+    if (dir === undefined) return;
     setSaveDir(dir);
   };
 
@@ -88,7 +72,6 @@ export default function Create() {
       return;
     }
     setProcessing(true);
-    // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
     invoke("create", {
       archiveFinishEvent: EVENT_ON_FINISH,
       entryStartEvent: EVENT_ON_ENTRY_START,
@@ -102,9 +85,7 @@ export default function Create() {
         password: password.length === 0 ? null : password,
       },
     })
-      .then(() => {
-        setProcessing(false);
-      })
+      .then(() => setProcessing(false))
       .catch((err) => {
         window.alert(err);
         setProcessing(false);
@@ -112,21 +93,15 @@ export default function Create() {
   };
 
   useEffect(() => {
-    const w = import("@tauri-apps/api/webviewWindow");
-    w.then((it) => {
+    import("@tauri-apps/api/webviewWindow").then((it) => {
       setAppWindow(it.getCurrentWebviewWindow());
     });
-    const a = import("@tauri-apps/api");
-    a.then((it) => {
-      setApi(it);
-    });
+    import("@tauri-apps/api").then((it) => setApi(it));
   }, []);
 
   useEffect(() => {
     const unlisten = appWindow?.onDragDropEvent((e) => {
-      if (e.payload.type !== "drop") {
-        return;
-      }
+      if (e.payload.type !== "drop") return;
       addFiles(e.payload.paths);
     });
     return () => {
@@ -157,81 +132,83 @@ export default function Create() {
   }, [api]);
 
   return (
-    <Flex
-      direction="column"
-      height="100%"
-      width="100%"
-      justify="between"
-      className={styles["ContentRoot"]}
-    >
-      <Flex direction="row" width="100%">
-        <TextField.Root
-          defaultValue={saveDir}
-          disabled={true}
-          style={{ width: "100%" }}
-        >
-          <TextField.Slot>
-            <Tooltip content="Save to">
-              <FileIcon onClick={openDirPicker} />
-            </Tooltip>
-          </TextField.Slot>
-        </TextField.Root>
-      </Flex>
-      <Flex direction="row" justify="center" align="center">
-        <Text onClick={openFilePicker}>
-          <b>Drop here to add to Archive</b>
-        </Text>
-      </Flex>
-      <ScrollArea style={{ border: "1px solid var(--accent-3)" }}>
-        <Flex direction="row" height="100%" width="100%">
-          <Table.Root
-            className={`${styles.FileList}`}
-            style={{ width: "100%" }}
-          >
-            <Table.Body>
+    <div className={styles.root}>
+      <div className={styles.saveBar}>
+        <span className={styles.saveBarLabel}>Save to</span>
+        <span className={styles.saveBarPath}>{saveDir}</span>
+        <button className={styles.saveBarButton} onClick={openDirPicker}>
+          <FileIcon />
+        </button>
+      </div>
+
+      <div className={styles.fileArea}>
+        {files.length === 0 ? (
+          <div className={styles.fileAreaEmpty} onClick={openFilePicker}>
+            <CubeIcon
+              width={32}
+              height={32}
+              style={{ color: "var(--gray-a6)" }}
+            />
+            <span className={styles.fileAreaHint}>Drop files here</span>
+            <span className={styles.fileAreaSubHint}>or click to browse</span>
+          </div>
+        ) : (
+          <>
+            <div className={styles.dropPrompt} onClick={openFilePicker}>
+              <span className={styles.dropPromptText}>
+                Drop more files or click to add
+              </span>
+            </div>
+            <div className={styles.fileList}>
               {files.map((it) => (
-                <Table.Row key={it}>
-                  <Table.Cell>
-                    {processing && it == name && (
-                      <span className={styles.Icon}>
-                        <ProcessingIcon />
-                      </span>
+                <div key={it} className={styles.fileItem}>
+                  <span className={styles.fileItemIcon}>
+                    {processing && it === name ? (
+                      <ProcessingIcon />
+                    ) : (
+                      <FileIcon width={12} height={12} />
                     )}
-                    <span>{it}</span>
-                  </Table.Cell>
-                </Table.Row>
+                  </span>
+                  <span
+                    className={`${styles.fileItemName} ${
+                      processing && it === name ? styles.fileItemProcessing : ""
+                    }`}
+                  >
+                    {it}
+                  </span>
+                </div>
               ))}
-            </Table.Body>
-          </Table.Root>
-        </Flex>
-      </ScrollArea>
-      <Flex direction="row" justify="end" width="100%">
-        <div>
-          <Button onClick={create} disabled={files.length === 0 || processing}>
-            <Spinner loading={processing}>
-              <CubeIcon />
-            </Spinner>
-            Create
-          </Button>
-          <Dialog.Root open={openSettings}>
-            <Dialog.Trigger>
-              <IconButton
-                onClick={() => setOpenSettings(true)}
-                disabled={processing}
-              >
-                <GearIcon />
-              </IconButton>
-            </Dialog.Trigger>
-            <Dialog.Content>
-              <Dialog.Title>Archive creation options</Dialog.Title>
-              <Flex direction="column" gap="2">
-                <label htmlFor="compression">Compression</label>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className={styles.actionBar}>
+        <Dialog.Root open={openSettings}>
+          <Dialog.Trigger>
+            <IconButton
+              variant="soft"
+              color="gray"
+              size="2"
+              onClick={() => setOpenSettings(true)}
+              disabled={processing}
+            >
+              <GearIcon />
+            </IconButton>
+          </Dialog.Trigger>
+          <Dialog.Content maxWidth="380px">
+            <Dialog.Title>Archive Options</Dialog.Title>
+            <Flex direction="column" gap="3" mt="2">
+              <Flex direction="column" gap="1">
+                <Text size="2" weight="medium">
+                  Compression
+                </Text>
                 <Select.Root
                   defaultValue={compression}
                   onValueChange={(e) => setCompression(e as Compression)}
                 >
                   <Select.Trigger />
-                  <Select.Content id="compression">
+                  <Select.Content>
                     {COMPRESSION.map((it) => (
                       <Select.Item key={it} value={it}>
                         {it}
@@ -239,13 +216,17 @@ export default function Create() {
                     ))}
                   </Select.Content>
                 </Select.Root>
-                <label htmlFor="encryption">Encryption</label>
+              </Flex>
+              <Flex direction="column" gap="1">
+                <Text size="2" weight="medium">
+                  Encryption
+                </Text>
                 <Select.Root
                   defaultValue={encryption}
                   onValueChange={(e) => setEncryption(e as Encryption)}
                 >
                   <Select.Trigger />
-                  <Select.Content id="encryption">
+                  <Select.Content>
                     {ENCRYPTION.map((it) => (
                       <Select.Item key={it} value={it}>
                         {it}
@@ -253,38 +234,51 @@ export default function Create() {
                     ))}
                   </Select.Content>
                 </Select.Root>
-                <label htmlFor="password">Password</label>
+              </Flex>
+              <Flex direction="column" gap="1">
+                <Text size="2" weight="medium">
+                  Password
+                </Text>
                 <TextField.Root
-                  id="password"
                   type="password"
+                  size="2"
                   disabled={encryption === "none"}
                   onChange={(e) => setPassword(e.target.value)}
                 />
-                <Text as="label" size="2">
-                  <Flex gap="2">
-                    <Checkbox
-                      defaultChecked={solidMode}
-                      onCheckedChange={(state) => {
-                        if (state === "indeterminate") {
-                          return;
-                        }
-                        setSolidMode(state);
-                      }}
-                    />
-                    Solid mode
-                  </Flex>
-                </Text>
               </Flex>
-              <Flex mt="4" justify="end">
-                <Dialog.Close>
-                  <Button onClick={() => setOpenSettings(false)}>Apply</Button>
-                </Dialog.Close>
-              </Flex>
-            </Dialog.Content>
-          </Dialog.Root>
-        </div>
-        {processing && <Uncontrolable></Uncontrolable>}
-      </Flex>
-    </Flex>
+              <Text as="label" size="2">
+                <Flex gap="2" align="center">
+                  <Checkbox
+                    defaultChecked={solidMode}
+                    onCheckedChange={(state) => {
+                      if (state === "indeterminate") return;
+                      setSolidMode(state);
+                    }}
+                  />
+                  Solid mode
+                </Flex>
+              </Text>
+            </Flex>
+            <Flex mt="4" justify="end">
+              <Dialog.Close>
+                <Button onClick={() => setOpenSettings(false)}>Done</Button>
+              </Dialog.Close>
+            </Flex>
+          </Dialog.Content>
+        </Dialog.Root>
+        <Button
+          size="2"
+          onClick={create}
+          disabled={files.length === 0 || processing}
+        >
+          <Spinner loading={processing}>
+            <CubeIcon />
+          </Spinner>
+          Create Archive
+        </Button>
+      </div>
+
+      {processing && <Uncontrolable />}
+    </div>
   );
 }

@@ -1,13 +1,146 @@
-.FileList {
-  --table-cell-padding: 6px;
-  --table-cell-min-height: 0px;
+.root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  gap: 12px;
 }
-.ContentRoot > * {
-  margin: calc(var(--space-2) / 2) 0;
+
+.saveBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--gray-a3);
+  border-radius: 8px;
+  font-size: 12px;
+  flex-shrink: 0;
 }
-.ContentRoot > *:first-child {
-  margin: 0 0 calc(var(--space-2) / 2);
+
+.saveBarLabel {
+  color: var(--gray-a7);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
 }
-.ContentRoot > *:last-child {
-  margin: calc(var(--space-2) / 2) 0 0;
+
+.saveBarPath {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--gray-a9);
+}
+
+.saveBarButton {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent-9);
+  cursor: default;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.saveBarButton:hover {
+  background: var(--accent-a3);
+}
+
+.fileArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1.5px dashed var(--gray-a5);
+  border-radius: 12px;
+  min-height: 0;
+  transition: border-color 0.3s ease, background-color 0.3s ease;
+  overflow: hidden;
+}
+
+.fileArea:hover {
+  border-color: var(--accent-7);
+}
+
+.fileAreaEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: default;
+}
+
+.fileAreaHint {
+  color: var(--gray-a9);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.fileAreaSubHint {
+  color: var(--gray-a7);
+  font-size: 12px;
+}
+
+.fileList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.fileItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--gray-11);
+  transition: background 0.15s ease;
+}
+
+.fileItem:hover {
+  background: var(--gray-a3);
+}
+
+.fileItemIcon {
+  color: var(--gray-a8);
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.fileItemName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileItemProcessing {
+  color: var(--accent-9);
+}
+
+.dropPrompt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  cursor: default;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--gray-a3);
+}
+
+.dropPromptText {
+  color: var(--gray-a7);
+  font-size: 11px;
+}
+
+.actionBar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
 }
