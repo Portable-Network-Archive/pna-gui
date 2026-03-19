@@ -3,19 +3,19 @@ import { useEffect, useState } from "react";
 import { Extract, Create } from "./tabs";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import styles from "./App.module.css";
-import { Text, Flex } from "@radix-ui/themes";
 
 type Mode = "extract" | "create";
 
 function App() {
   const [appWindow, setAppWindow] = useState<WebviewWindow>();
   const [mode, setMode] = useState<Mode>("extract");
+
   useEffect(() => {
-    const w = import("@tauri-apps/api/webviewWindow");
-    w.then((it) => {
+    import("@tauri-apps/api/webviewWindow").then((it) => {
       setAppWindow(it.getCurrentWebviewWindow());
     });
   }, []);
+
   useEffect(() => {
     const unlisten = appWindow?.listen<Mode>("switch_tab", (e) => {
       setMode(e.payload);
@@ -27,35 +27,28 @@ function App() {
   }, [appWindow]);
 
   return (
-    <Flex direction="row" width="100%" height="100%">
-      <Flex direction="column">
-        <div className={styles.LeftMenuRoot}>
-          <div className={styles.MenuContainer}>
-            <span
-              className={`${styles.Item} ${
-                mode === "extract" ? styles.Active : styles.Inactive
-              }`}
-              onClick={() => setMode("extract")}
-            >
-              <Text>Extract</Text>
-            </span>
-            <span
-              className={`${styles.Item} ${
-                mode === "create" ? styles.Active : styles.Inactive
-              }`}
-              onClick={() => setMode("create")}
-            >
-              <Text>Create</Text>
-            </span>
-          </div>
-          <div></div>
+    <div className={styles.root}>
+      <nav className={styles.tabBar}>
+        <div className={styles.tabGroup}>
+          <button
+            className={`${styles.tab} ${mode === "extract" ? styles.active : ""}`}
+            onClick={() => setMode("extract")}
+          >
+            Extract
+          </button>
+          <button
+            className={`${styles.tab} ${mode === "create" ? styles.active : ""}`}
+            onClick={() => setMode("create")}
+          >
+            Create
+          </button>
         </div>
-      </Flex>
-      <Flex width="100%" height="100%" p="2">
+      </nav>
+      <main className={styles.content}>
         {mode === "extract" && <Extract />}
         {mode === "create" && <Create />}
-      </Flex>
-    </Flex>
+      </main>
+    </div>
   );
 }
 

@@ -10,7 +10,7 @@ use std::{
 use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{
-    menu::{MenuBuilder, MenuItem},
+    menu::{MenuBuilder, MenuItem, SubmenuBuilder},
     Emitter, Window,
 };
 
@@ -270,6 +270,10 @@ const MENU_UPDATE_CHECK: &str = "update check";
 const MENU_EXTRACT_TAB: &str = "extract tab";
 const MENU_CREATE_TAB: &str = "create tab";
 
+const TRAY_UPDATE_CHECK: &str = "tray_update_check";
+const TRAY_EXTRACT_TAB: &str = "tray_extract_tab";
+const TRAY_CREATE_TAB: &str = "tray_create_tab";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -281,6 +285,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
+            // --- Window Menu Bar (matching v1 Menu::os_default layout) ---
             let update_check = MenuItem::with_id(
                 app,
                 MENU_UPDATE_CHECK,
@@ -311,21 +316,130 @@ pub fn run() {
                 }),
             )?;
 
-            let menu = MenuBuilder::new(app)
+            #[cfg(target_os = "macos")]
+            let app_menu = {
+                // macOS: [AppName, Edit, View, Window, Help]
+                // "Check for updates..." goes into AppName submenu
+                // "Extract" and "Create" go into Window submenu
+                let app_submenu =
+                    SubmenuBuilder::new(app, &app.package_info().name)
+                        .about(None)
+                        .item(&update_check)
+                        .separator()
+                        .services()
+                        .separator()
+                        .hide()
+                        .hide_others()
+                        .show_all()
+                        .separator()
+                        .quit()
+                        .build()?;
+                let edit_submenu = SubmenuBuilder::new(app, "Edit")
+                    .undo()
+                    .redo()
+                    .separator()
+                    .cut()
+                    .copy()
+                    .paste()
+                    .select_all()
+                    .build()?;
+                let view_submenu = SubmenuBuilder::new(app, "View")
+                    .fullscreen()
+                    .build()?;
+                let window_submenu =
+                    SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, "Window")
+                        .items(&[&extract_tab, &create_tab])
+                        .separator()
+                        .minimize()
+                        .maximize()
+                        .close_window()
+                        .build()?;
+                let help_submenu =
+                    SubmenuBuilder::with_id(app, tauri::menu::HELP_SUBMENU_ID, "Help")
+                        .build()?;
+                MenuBuilder::new(app)
+                    .items(&[
+                        &app_submenu,
+                        &edit_submenu,
+                        &view_submenu,
+                        &window_submenu,
+                        &help_submenu,
+                    ])
+                    .build()?
+            };
+
+            #[cfg(not(target_os = "macos"))]
+            let app_menu = {
+                // Windows/Linux: OS-default-like + Tools submenu + Extract/Create
+                let file_submenu = SubmenuBuilder::new(app, "File")
+                    .close_window()
+                    .build()?;
+                let tools_submenu = SubmenuBuilder::new(app, "Tools")
+                    .item(&update_check)
+                    .build()?;
+                let window_submenu = SubmenuBuilder::new(app, "Window")
+                    .items(&[&extract_tab, &create_tab])
+                    .build()?;
+                MenuBuilder::new(app)
+                    .items(&[&file_submenu, &tools_submenu, &window_submenu])
+                    .build()?
+            };
+
+            app.set_menu(app_menu)?;
+
+            app.on_menu_event(|handle, event| {
+                match event.id().as_ref() {
+                    MENU_UPDATE_CHECK => {
+                        handle.emit("tauri://update", ()).unwrap();
+                    }
+                    MENU_EXTRACT_TAB => {
+                        handle.emit("switch_tab", "extract").unwrap();
+                    }
+                    MENU_CREATE_TAB => {
+                        handle.emit("switch_tab", "create").unwrap();
+                    }
+                    _ => {}
+                };
+            });
+
+            // --- Tray Menu ---
+            let tray_update_check = MenuItem::with_id(
+                app,
+                TRAY_UPDATE_CHECK,
+                "Check for updates...",
+                true,
+                None::<&str>,
+            )?;
+            let tray_extract_tab = MenuItem::with_id(
+                app,
+                TRAY_EXTRACT_TAB,
+                "Extract",
+                true,
+                None::<&str>,
+            )?;
+            let tray_create_tab = MenuItem::with_id(
+                app,
+                TRAY_CREATE_TAB,
+                "Create",
+                true,
+                None::<&str>,
+            )?;
+            let tray_menu = MenuBuilder::new(app)
                 .close_window()
-                .items(&[&update_check, &extract_tab, &create_tab])
+                .items(&[&tray_update_check, &tray_extract_tab, &tray_create_tab])
                 .build()?;
+
             let _tray = tauri::tray::TrayIconBuilder::new()
-                .menu(&menu)
+                .menu(&tray_menu)
                 .on_menu_event(|handle, event| {
                     match event.id().as_ref() {
-                        MENU_UPDATE_CHECK => {
+                        TRAY_UPDATE_CHECK => {
                             handle.emit("tauri://update", ()).unwrap();
                         }
-                        MENU_EXTRACT_TAB => {
+                        TRAY_EXTRACT_TAB => {
                             handle.emit("switch_tab", "extract").unwrap();
                         }
-                        MENU_CREATE_TAB => {
+                        TRAY_CREATE_TAB => {
                             handle.emit("switch_tab", "create").unwrap();
                         }
                         m => println!("{}", m),
