@@ -1,8 +1,10 @@
 @import "@radix-ui/themes/styles.css";
+
 * {
   box-sizing: border-box;
   overscroll-behavior: none;
 }
+
 html,
 body {
   height: 100vh;
@@ -13,6 +15,24 @@ body {
   cursor: default;
   overflow: hidden;
 }
+
 body > div {
   height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--gray-a4);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-a6);
 }
