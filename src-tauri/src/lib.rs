@@ -346,15 +346,17 @@ pub fn run() {
                 let view_submenu = SubmenuBuilder::new(app, "View")
                     .fullscreen()
                     .build()?;
-                let window_submenu = SubmenuBuilder::new(app, "Window")
-                    .items(&[&extract_tab, &create_tab])
-                    .separator()
-                    .minimize()
-                    .maximize()
-                    .close_window()
-                    .build()?;
-                let help_submenu = SubmenuBuilder::new(app, "Help")
-                    .build()?;
+                let window_submenu =
+                    SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, "Window")
+                        .items(&[&extract_tab, &create_tab])
+                        .separator()
+                        .minimize()
+                        .maximize()
+                        .close_window()
+                        .build()?;
+                let help_submenu =
+                    SubmenuBuilder::with_id(app, tauri::menu::HELP_SUBMENU_ID, "Help")
+                        .build()?;
                 MenuBuilder::new(app)
                     .items(&[
                         &app_submenu,
