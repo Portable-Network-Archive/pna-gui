@@ -5,15 +5,9 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getMatches } from "@tauri-apps/plugin-cli";
 import Uncontrolable from "../components/Uncontrolable";
-import {
-  Flex,
-  Text,
-  Dialog,
-  Button,
-  TextField,
-  Spinner,
-} from "@radix-ui/themes";
+import { Text, Dialog, Button, TextField, Spinner, Flex } from "@radix-ui/themes";
 import Image from "next/image";
+import styles from "./Extract.module.css";
 
 const EVENT_ON_START_PROCESS_ENTRY = "extract_processing";
 
@@ -27,7 +21,6 @@ export default function Extract() {
 
   const extract = (path: string, password?: string) => {
     setProcessing(true);
-    // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
     invoke("extract", { path, password, event: EVENT_ON_START_PROCESS_ENTRY })
       .then(() => {
         setArchivePath(undefined);
@@ -48,27 +41,17 @@ export default function Extract() {
   };
 
   const openFilePicker = async () => {
-    if (processing) {
-      return;
-    }
+    if (processing) return;
     const files = await open({
-      filters: [
-        {
-          name: "pna",
-          extensions: ["pna"],
-        },
-      ],
+      filters: [{ name: "pna", extensions: ["pna"] }],
     });
-    if (files === null) {
-      return;
-    }
-    // NOTE: take first element
+    if (files === null) return;
     const file = [files].flat().pop();
     setArchivePath(file);
   };
+
   useEffect(() => {
-    const w = import("@tauri-apps/api/webviewWindow");
-    w.then((it) => {
+    import("@tauri-apps/api/webviewWindow").then((it) => {
       setAppWindow(it.getCurrentWebviewWindow());
     });
     getMatches().then((matches) => {
@@ -94,9 +77,7 @@ export default function Extract() {
 
   useEffect(() => {
     const unlisten = appWindow?.onDragDropEvent((e) => {
-      if (e.payload.type !== "drop") {
-        return;
-      }
+      if (e.payload.type !== "drop") return;
       for (const path of e.payload.paths) {
         setArchivePath(path);
       }
@@ -109,9 +90,7 @@ export default function Extract() {
   useEffect(() => {
     const unlisten = appWindow?.listen<string>(
       EVENT_ON_START_PROCESS_ENTRY,
-      (e) => {
-        setName(e.payload);
-      },
+      (e) => setName(e.payload),
     );
     return () => {
       unlisten?.then((it) => it());
@@ -119,80 +98,73 @@ export default function Extract() {
   }, [appWindow]);
 
   useEffect(() => {
-    const path = archivePath;
-    if (path === undefined) {
-      return;
-    }
-    extract(path, password);
+    if (archivePath === undefined) return;
+    extract(archivePath, password);
   }, [archivePath, password]);
 
   return (
-    <Flex
-      direction="column"
-      style={{ height: "100vh" }}
-      justify="center"
-      width="100%"
-    >
-      <Flex direction="row">
-        <Dialog.Root open={openPasswordDialog}>
-          <Dialog.Content>
-            <Dialog.Title>Input password</Dialog.Title>
-            <Dialog.Description>
-              This archive is encrypted need a password to extract
-            </Dialog.Description>
-            <Flex direction="column">
-              <label htmlFor="password">
-                <Text as="div" size="2" mb="1" weight="bold">
-                  Password
-                </Text>
-                <TextField.Root id="password" type="password" />
-              </label>
-            </Flex>
-            <Flex gap="3" mt="4" justify="end">
-              <Dialog.Close
-                onClick={async () => {
-                  setProcessing(false);
-                  setOpenPasswordDialog(false);
-                }}
-              >
-                <Button variant="soft" color="gray">
-                  Cancel
-                </Button>
-              </Dialog.Close>
-              <Dialog.Close
-                onClick={async () => {
-                  setPassword(
-                    (document.getElementById("password") as HTMLInputElement)
-                      .value,
-                  );
-                  setOpenPasswordDialog(false);
-                }}
-              >
-                <Button>Extract</Button>
-              </Dialog.Close>
-            </Flex>
-          </Dialog.Content>
-        </Dialog.Root>
-      </Flex>
-      <Flex width="100%" align="center" justify="center">
-        <span onClick={openFilePicker}>
-          <Image src="/pna.svg" alt="PNA" width="100" height="100" />
-        </span>
-      </Flex>
-      <Flex width="100%" align="center" justify="center">
-        {processing && (
+    <div className={styles.root}>
+      <div className={styles.dropZone} onClick={openFilePicker}>
+        {processing ? (
+          <div className={styles.processingInfo}>
+            <Spinner size="3" />
+            <Text size="2" weight="medium" style={{ color: "var(--gray-11)" }}>
+              Extracting...
+            </Text>
+            <span className={styles.processingName}>{name}</span>
+          </div>
+        ) : (
           <>
-            <Spinner />
-            <Text>Extracting {name} ...</Text>
+            <span className={styles.icon}>
+              <Image src="/pna.svg" alt="PNA" width={72} height={72} />
+            </span>
+            <span className={styles.hint}>Drop .pna file here</span>
+            <span className={styles.subHint}>or click to browse</span>
           </>
         )}
-        {!processing && (
-          <Text className="clickable" onClick={openFilePicker}>
-            <b>Drop here to extract Archive</b>
-          </Text>
-        )}
-      </Flex>
+      </div>
+
+      <Dialog.Root open={openPasswordDialog}>
+        <Dialog.Content maxWidth="400px">
+          <Dialog.Title>Password Required</Dialog.Title>
+          <Dialog.Description size="2" color="gray">
+            This archive is encrypted. Enter the password to extract.
+          </Dialog.Description>
+          <Flex direction="column" mt="4">
+            <label htmlFor="password">
+              <Text as="div" size="2" mb="1" weight="medium">
+                Password
+              </Text>
+              <TextField.Root id="password" type="password" size="2" />
+            </label>
+          </Flex>
+          <Flex gap="3" mt="4" justify="end">
+            <Dialog.Close
+              onClick={() => {
+                setProcessing(false);
+                setOpenPasswordDialog(false);
+              }}
+            >
+              <Button variant="soft" color="gray">
+                Cancel
+              </Button>
+            </Dialog.Close>
+            <Dialog.Close
+              onClick={() => {
+                setPassword(
+                  (document.getElementById("password") as HTMLInputElement)
+                    .value,
+                );
+                setOpenPasswordDialog(false);
+              }}
+            >
+              <Button>Extract</Button>
+            </Dialog.Close>
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
+
       {processing && <Uncontrolable />}
-    </Flex>
+    </div>
   );
 }
