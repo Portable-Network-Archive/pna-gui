@@ -52,6 +52,7 @@ async fn extract(
     event: String,
     path: &str,
     password: Option<String>,
+    out_dir: Option<PathBuf>,
 ) -> tauri::Result<()> {
     if password.is_none() && utils::is_encrypted(path)? {
         return Err(tauri::Error::Io(io::Error::other("encrypted")));
@@ -59,6 +60,7 @@ async fn extract(
     Ok(_extract(
         path.as_ref(),
         password.as_deref(),
+        out_dir.as_deref(),
         |e, name| match e {
             Event::Start => (),
             Event::Finish => open::that(name).unwrap(),
@@ -230,6 +232,7 @@ where
 fn _extract<OnChangeArchive, OnChangeEntry>(
     path: &Path,
     password: Option<&str>,
+    out_dir: Option<&Path>,
     on_change_archive: OnChangeArchive,
     on_change_entry: OnChangeEntry,
 ) -> io::Result<()>
@@ -238,7 +241,9 @@ where
     OnChangeArchive: Fn(Event, &Path),
 {
     let file_name: &Path = path.file_stem().unwrap_or("pna".as_ref()).as_ref();
-    let out_dir = if let Some(parent) = path.parent() {
+    let out_dir = if let Some(dir) = out_dir {
+        dir.join(file_name)
+    } else if let Some(parent) = path.parent() {
         parent.join(file_name)
     } else {
         file_name.to_owned()

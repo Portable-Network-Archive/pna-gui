@@ -18,13 +18,15 @@ export default function Extract() {
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
   const [openPasswordDialog, setOpenPasswordDialog] = useState(false);
+  const [outDir, setOutDir] = useState<string>();
 
   const extract = (path: string, password?: string) => {
     setProcessing(true);
-    invoke("extract", { path, password, event: EVENT_ON_START_PROCESS_ENTRY })
+    invoke("extract", { path, password, event: EVENT_ON_START_PROCESS_ENTRY, outDir })
       .then(() => {
         setArchivePath(undefined);
         setPassword(undefined);
+        setOutDir(undefined);
         setProcessing(false);
       })
       .catch((err) => {
@@ -35,9 +37,22 @@ export default function Extract() {
         }
         setArchivePath(undefined);
         setPassword(undefined);
+        setOutDir(undefined);
         setProcessing(false);
         window.alert(err);
       });
+  };
+
+  const selectOutputAndSetPath = async (path: string) => {
+    const dir = await open({
+      title: "Extract to...",
+      directory: true,
+    });
+    if (dir === null) return;
+    const selectedDir = [dir].flat().pop();
+    if (selectedDir === undefined) return;
+    setOutDir(selectedDir);
+    setArchivePath(path);
   };
 
   const openFilePicker = async () => {
@@ -47,7 +62,8 @@ export default function Extract() {
     });
     if (files === null) return;
     const file = [files].flat().pop();
-    setArchivePath(file);
+    if (file === undefined) return;
+    await selectOutputAndSetPath(file);
   };
 
   useEffect(() => {
@@ -76,10 +92,10 @@ export default function Extract() {
   }, []);
 
   useEffect(() => {
-    const unlisten = appWindow?.onDragDropEvent((e) => {
+    const unlisten = appWindow?.onDragDropEvent(async (e) => {
       if (e.payload.type !== "drop") return;
       for (const path of e.payload.paths) {
-        setArchivePath(path);
+        await selectOutputAndSetPath(path);
       }
     });
     return () => {

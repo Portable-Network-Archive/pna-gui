@@ -2,9 +2,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { readAllIfDir } from "../utils/fs";
-import { CubeIcon, FileIcon, GearIcon } from "@radix-ui/react-icons";
+import { CubeIcon, Cross1Icon, FileIcon, GearIcon } from "@radix-ui/react-icons";
 import ProcessingIcon from "../components/ProcessingIcon";
 import styles from "./Create.module.css";
 import Uncontrolable from "../components/Uncontrolable";
@@ -31,16 +31,15 @@ type Encryption = (typeof ENCRYPTION)[number];
 
 export default function Create() {
   const [appWindow, setAppWindow] = useState<WebviewWindow>();
-  const [api, setApi] = useState<typeof import("@tauri-apps/api")>();
   const [openSettings, setOpenSettings] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
-  const [name, setName] = useState("");
+  const [processingEntry, setProcessingEntry] = useState("");
   const [processing, setProcessing] = useState(false);
   const [compression, setCompression] = useState<Compression>("zstd");
   const [encryption, setEncryption] = useState<Encryption>("none");
   const [password, setPassword] = useState<string>("");
   const [solidMode, setSolidMode] = useState(false);
-  const [saveDir, setSaveDir] = useState<string | undefined>(undefined);
+  const [draggingOver, setDraggingOver] = useState(false);
 
   const addFiles = async (paths: string[]) => {
     let files: string[] = [];
@@ -57,27 +56,34 @@ export default function Create() {
     await addFiles([files].flat());
   };
 
-  const openDirPicker = async () => {
-    if (processing) return;
-    const dirs = await open({ directory: true });
-    if (dirs === null) return;
-    const dir = [dirs].flat().pop();
-    if (dir === undefined) return;
-    setSaveDir(dir);
-  };
-
   const create = async () => {
     if (encryption !== "none" && password.length === 0) {
       window.alert("password is needed");
       return;
     }
+
+    const filePath = await save({
+      title: "Save Archive",
+      defaultPath: "archive.pna",
+      filters: [{ name: "PNA Archive", extensions: ["pna"] }],
+    });
+    if (filePath === null) return;
+
+    const finalPath = filePath.endsWith(".pna") ? filePath : filePath + ".pna";
+    const lastSep = Math.max(
+      finalPath.lastIndexOf("/"),
+      finalPath.lastIndexOf("\\"),
+    );
+    const saveDir = lastSep >= 0 ? finalPath.substring(0, lastSep) : ".";
+    const archiveName = finalPath.substring(lastSep + 1);
+
     setProcessing(true);
     invoke("create", {
       archiveFinishEvent: EVENT_ON_FINISH,
       entryStartEvent: EVENT_ON_ENTRY_START,
-      name: "archive.pna",
+      name: archiveName,
       files,
-      saveDir: saveDir || (await api?.path.desktopDir()),
+      saveDir,
       option: {
         solid: solidMode,
         compression,
@@ -96,13 +102,18 @@ export default function Create() {
     import("@tauri-apps/api/webviewWindow").then((it) => {
       setAppWindow(it.getCurrentWebviewWindow());
     });
-    import("@tauri-apps/api").then((it) => setApi(it));
   }, []);
 
   useEffect(() => {
     const unlisten = appWindow?.onDragDropEvent((e) => {
-      if (e.payload.type !== "drop") return;
-      addFiles(e.payload.paths);
+      if (e.payload.type === "over") {
+        setDraggingOver(true);
+      } else if (e.payload.type === "leave" || e.payload.type === "drop") {
+        setDraggingOver(false);
+      }
+      if (e.payload.type === "drop") {
+        addFiles(e.payload.paths);
+      }
     });
     return () => {
       unlisten?.then((it) => it());
@@ -111,7 +122,7 @@ export default function Create() {
 
   useEffect(() => {
     const unlisten = appWindow?.listen<string>(EVENT_ON_ENTRY_START, (e) => {
-      setName(e.payload);
+      setProcessingEntry(e.payload);
     });
     return () => {
       unlisten?.then((it) => it());
@@ -127,27 +138,19 @@ export default function Create() {
     };
   }, [appWindow]);
 
-  useEffect(() => {
-    api?.path.desktopDir().then(setSaveDir);
-  }, [api]);
-
   return (
     <div className={styles.root}>
-      <div className={styles.saveBar}>
-        <span className={styles.saveBarLabel}>Save to</span>
-        <span className={styles.saveBarPath}>{saveDir}</span>
-        <button className={styles.saveBarButton} onClick={openDirPicker}>
-          <FileIcon />
-        </button>
-      </div>
-
-      <div className={styles.fileArea}>
+      <div className={`${styles.fileArea} ${draggingOver ? styles.dragOver : ""}`}>
         {files.length === 0 ? (
           <div className={styles.fileAreaEmpty} onClick={openFilePicker}>
             <CubeIcon
               width={32}
               height={32}
-              style={{ color: "var(--gray-a6)" }}
+              style={{
+                color: draggingOver ? "var(--accent-a8)" : "var(--gray-a6)",
+                transform: draggingOver ? "scale(1.08)" : "scale(1)",
+                transition: "transform 0.2s ease, color 0.2s ease",
+              }}
             />
             <span className={styles.fileAreaHint}>Drop files here</span>
             <span className={styles.fileAreaSubHint}>or click to browse</span>
@@ -163,7 +166,7 @@ export default function Create() {
               {files.map((it) => (
                 <div key={it} className={styles.fileItem}>
                   <span className={styles.fileItemIcon}>
-                    {processing && it === name ? (
+                    {processing && it === processingEntry ? (
                       <ProcessingIcon />
                     ) : (
                       <FileIcon width={12} height={12} />
@@ -171,11 +174,23 @@ export default function Create() {
                   </span>
                   <span
                     className={`${styles.fileItemName} ${
-                      processing && it === name ? styles.fileItemProcessing : ""
+                      processing && it === processingEntry
+                        ? styles.fileItemProcessing
+                        : ""
                     }`}
                   >
                     {it}
                   </span>
+                  {!processing && (
+                    <button
+                      className={styles.fileItemRemove}
+                      onClick={() =>
+                        setFiles((current) => current.filter((f) => f !== it))
+                      }
+                    >
+                      <Cross1Icon width={10} height={10} />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -190,6 +205,7 @@ export default function Create() {
               variant="soft"
               color="gray"
               size="2"
+              className={styles.gearButton}
               onClick={() => setOpenSettings(true)}
               disabled={processing}
             >
