@@ -362,11 +362,11 @@ dependencies = [
 
 [[package]]
 name = "camino"
-version = "1.1.10"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0da45bc31171d8d6960122e222a67740df867c1dd53b4d51caa297084c185cab"
+checksum = "e629a66d692cb9ff1a1c664e41771b3dcaf961985a9774c0eb0bd1b51cf60a48"
 dependencies = [
- "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -985,9 +985,9 @@ dependencies = [
 
 [[package]]
 name = "flate2"
-version = "1.1.2"
+version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a3d7db9596fecd151c5f638c0ee5d5bd487b6e0ea232e5dc96d5250f6f94b1d"
+checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -1971,9 +1971,9 @@ dependencies = [
 
 [[package]]
 name = "liblzma"
-version = "0.4.2"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0791ab7e08ccc8e0ce893f6906eb2703ed8739d8e89b57c0714e71bad09024c8"
+checksum = "b6033b77c21d1f56deeae8014eb9fbe7bdf1765185a6c508b5ca82eeaed7f899"
 dependencies = [
  "liblzma-sys",
 ]
@@ -1991,9 +1991,9 @@ dependencies = [
 
 [[package]]
 name = "libpna"
-version = "0.26.1"
+version = "0.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "252204fc2eef32e6fde302587aa57aa4de71113102c48148e42be4cd5c7c8d63"
+checksum = "0e4a2bf0ee61fce48454be32ac4b6ee2c8fbd5fad5fd87012bab523545476b39"
 dependencies = [
  "aes",
  "argon2",
@@ -2012,6 +2012,7 @@ dependencies = [
  "pbkdf2",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "time",
  "zstd",
 ]
 
