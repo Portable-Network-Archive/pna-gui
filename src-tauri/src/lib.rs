@@ -251,7 +251,7 @@ where
     on_change_archive(Event::Start, &out_dir);
     let file = fs::File::open(path)?;
     let mut archive = libpna::Archive::read_header(file)?;
-    for entry in archive.entries_with_password(password) {
+    for entry in archive.entries_with_password(password.map(str::as_bytes)) {
         let entry = entry?;
         if libpna::DataKind::File != entry.header().data_kind() {
             continue;
@@ -326,19 +326,18 @@ pub fn run() {
                 // macOS: [AppName, Edit, View, Window, Help]
                 // "Check for updates..." goes into AppName submenu
                 // "Extract" and "Create" go into Window submenu
-                let app_submenu =
-                    SubmenuBuilder::new(app, &app.package_info().name)
-                        .about(None)
-                        .item(&update_check)
-                        .separator()
-                        .services()
-                        .separator()
-                        .hide()
-                        .hide_others()
-                        .show_all()
-                        .separator()
-                        .quit()
-                        .build()?;
+                let app_submenu = SubmenuBuilder::new(app, &app.package_info().name)
+                    .about(None)
+                    .item(&update_check)
+                    .separator()
+                    .services()
+                    .separator()
+                    .hide()
+                    .hide_others()
+                    .show_all()
+                    .separator()
+                    .quit()
+                    .build()?;
                 let edit_submenu = SubmenuBuilder::new(app, "Edit")
                     .undo()
                     .redo()
@@ -348,9 +347,7 @@ pub fn run() {
                     .paste()
                     .select_all()
                     .build()?;
-                let view_submenu = SubmenuBuilder::new(app, "View")
-                    .fullscreen()
-                    .build()?;
+                let view_submenu = SubmenuBuilder::new(app, "View").fullscreen().build()?;
                 let window_submenu =
                     SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, "Window")
                         .items(&[&extract_tab, &create_tab])
@@ -360,8 +357,7 @@ pub fn run() {
                         .close_window()
                         .build()?;
                 let help_submenu =
-                    SubmenuBuilder::with_id(app, tauri::menu::HELP_SUBMENU_ID, "Help")
-                        .build()?;
+                    SubmenuBuilder::with_id(app, tauri::menu::HELP_SUBMENU_ID, "Help").build()?;
                 MenuBuilder::new(app)
                     .items(&[
                         &app_submenu,
@@ -376,9 +372,7 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let app_menu = {
                 // Windows/Linux: OS-default-like + Tools submenu + Extract/Create
-                let file_submenu = SubmenuBuilder::new(app, "File")
-                    .close_window()
-                    .build()?;
+                let file_submenu = SubmenuBuilder::new(app, "File").close_window().build()?;
                 let tools_submenu = SubmenuBuilder::new(app, "Tools")
                     .item(&update_check)
                     .build()?;
@@ -415,20 +409,10 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            let tray_extract_tab = MenuItem::with_id(
-                app,
-                TRAY_EXTRACT_TAB,
-                "Extract",
-                true,
-                None::<&str>,
-            )?;
-            let tray_create_tab = MenuItem::with_id(
-                app,
-                TRAY_CREATE_TAB,
-                "Create",
-                true,
-                None::<&str>,
-            )?;
+            let tray_extract_tab =
+                MenuItem::with_id(app, TRAY_EXTRACT_TAB, "Extract", true, None::<&str>)?;
+            let tray_create_tab =
+                MenuItem::with_id(app, TRAY_CREATE_TAB, "Create", true, None::<&str>)?;
             let tray_menu = MenuBuilder::new(app)
                 .close_window()
                 .items(&[&tray_update_check, &tray_extract_tab, &tray_create_tab])
