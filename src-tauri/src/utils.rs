@@ -5,7 +5,7 @@ use libpna::{Archive, Encryption};
 pub(crate) fn is_encrypted<P: AsRef<Path>>(path: P) -> io::Result<bool> {
     let file = fs::File::open(path)?;
     let mut archive = Archive::read_header(file)?;
-    for entry in archive.entries_skip_solid() {
+    for entry in archive.entries().skip_solid() {
         let entry = entry?;
         match entry.header().encryption() {
             Encryption::No => (),
