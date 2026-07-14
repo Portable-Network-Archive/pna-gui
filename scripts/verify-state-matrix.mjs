@@ -21,9 +21,10 @@ const ALLOWED_LAYERS = new Set([
   "rust-unit",
   "rust-integration",
   "browser-component",
+  "tauri-e2e",
   "build-contract",
 ]);
-const CASE_PATTERN = /\b(?:UI|BE|ARCH)-[A-Z0-9-]+\b/g;
+const CASE_PATTERN = /\b(?:UI|BE|ARCH|E2E)-[A-Z0-9-]+\b/g;
 
 export function parseTsv(source) {
   const lines = source.split(/\r?\n/).filter((line) => line.trim().length > 0);
@@ -53,7 +54,7 @@ export function validateMatrix(source, repositoryRoot) {
   const ids = new Set();
 
   for (const row of rows) {
-    if (!/^(?:UI|BE|ARCH)-[A-Z0-9-]+$/.test(row.case_id)) {
+    if (!/^(?:UI|BE|ARCH|E2E)-[A-Z0-9-]+$/.test(row.case_id)) {
       errors.push(`Invalid case_id: ${row.case_id}`);
     }
     if (ids.has(row.case_id)) errors.push(`Duplicate case_id: ${row.case_id}`);
@@ -93,7 +94,7 @@ function main() {
   const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const matrixPath = resolve(
     repositoryRoot,
-    "docs/testing/feature-state-matrix.tsv",
+    "tests/resources/feature-state-matrix.tsv",
   );
   const result = validateMatrix(
     readFileSync(matrixPath, "utf8"),

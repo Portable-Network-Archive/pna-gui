@@ -4,3 +4,4 @@ out
 playwright/.cache
 test-results
 playwright-report
+.e2e

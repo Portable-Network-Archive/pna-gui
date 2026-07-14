@@ -6,12 +6,18 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:release": "npm run build && npm run test:release-boundary",
     "start": "next start",
     "lint": "eslint .",
     "test:matrix": "node scripts/verify-state-matrix.mjs",
     "test:unit": "vitest run",
     "test:browser": "playwright test -c playwright-ct.config.ts",
+    "test:e2e:prepare": "cargo run --quiet --manifest-path src-tauri/Cargo.toml --features tauri-e2e --example generate_e2e_fixture -- .e2e/e2e-fixture.pna",
+    "test:e2e:build": "node scripts/build-tauri-e2e.mjs",
+    "test:e2e": "npm run test:e2e:prepare && wdio run wdio.conf.ts",
+    "test:e2e:ci": "npm run test:e2e:build && npm run test:e2e",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --all-features",
+    "test:release-boundary": "node scripts/verify-release-boundary.mjs",
     "test:ci": "npm run test:matrix && npm run test:unit && npm run test:rust",
     "tauri": "tauri",
     "format": "prettier --write './{src,tests,playwright,scripts}/**/*.{js,mjs,jsx,ts,tsx,json,css}' './*.{js,mjs,ts}'",
@@ -26,8 +32,6 @@
     "@tauri-apps/plugin-cli": "^2.4.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
-    "@tauri-apps/plugin-shell": "^2.3.5",
-    "@tauri-apps/plugin-updater": "^2.10.1",
     "next": "16.2.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
@@ -42,11 +46,23 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
+    "@wdio/cli": "^9.29.1",
+    "@wdio/globals": "^9.29.1",
+    "@wdio/local-runner": "^9.29.1",
+    "@wdio/mocha-framework": "^9.29.1",
+    "@wdio/spec-reporter": "^9.29.1",
+    "@wdio/tauri-plugin": "^1.2.0",
+    "@wdio/tauri-service": "^1.2.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "16.2.9",
     "jsdom": "^26.1.0",
     "prettier": "^3.8.3",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "@wdio/tauri-service": {
+      "@wdio/native-utils": "2.5.0"
+    }
   }
 }

@@ -37,13 +37,15 @@ jobs:
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
       - name: install app dependencies
         run: npm ci
       - name: verify feature-state matrix
         run: npm run test:matrix
       - name: run frontend unit and component tests
         run: npm run test:unit
+      - name: build frontend asset for Rust tests
+        run: npm run build
       - name: run Rust tests
         run: npm run test:rust
       - name: install Chromium for visual component tests
@@ -52,8 +54,12 @@ jobs:
       - name: run visual component tests
         if: matrix.platform == 'ubuntu-latest'
         run: npm run test:browser
-      - name: build frontend
-        run: npm run build
+      - name: build Tauri E2E application
+        if: matrix.platform == 'ubuntu-latest'
+        run: npm run test:e2e:build
+      - name: run Tauri E2E tests
+        if: matrix.platform == 'ubuntu-latest'
+        run: xvfb-run -a npm run test:e2e
       - uses: tauri-apps/tauri-action@v0
         with:
           tauriScript: 'npm run tauri'

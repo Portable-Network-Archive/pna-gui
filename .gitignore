@@ -36,6 +36,7 @@ dist-ssr
 /playwright/.cache/
 /test-results/
 /playwright-report/
+/.e2e/
 
 # next.js
 /.next/

@@ -978,6 +978,32 @@ mod tests {
     }
 
     #[test]
+    fn encrypted_archive_preview_decrypts_exact_content() {
+        // BE-PREVIEW-ENCRYPTED
+        let path = test_archive_path("encrypted-preview");
+        write_test_archive(&path, false, true);
+        let (summary, entries) = build_index("encrypted-preview", &path, Some("secret")).unwrap();
+        let file = entries
+            .iter()
+            .find(|entry| entry.dto.path == "docs/readme.txt")
+            .unwrap()
+            .clone();
+        let session = ArchiveSession {
+            path: path.clone(),
+            password: Some("secret".to_string()),
+            summary,
+            entries,
+        };
+
+        let preview = preview_entry(&session, &file, 128).unwrap();
+
+        assert_eq!(preview.kind, "text");
+        assert_eq!(preview.text.as_deref(), Some("hello from pna"));
+        assert!(!preview.truncated);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn reads_archives_created_by_installed_cli() {
         if Command::new("pna").arg("--version").output().is_err() {
             return;
