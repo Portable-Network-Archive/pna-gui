@@ -191,6 +191,7 @@ export default function Create() {
                   {!processing && (
                     <button
                       className={styles.fileItemRemove}
+                      aria-label={`${t("removeFile")}: ${it}`}
                       onClick={() =>
                         setFiles((current) => current.filter((f) => f !== it))
                       }
@@ -213,6 +214,7 @@ export default function Create() {
               color="gray"
               size="2"
               className={styles.gearButton}
+              aria-label={t("archiveOptions")}
               onClick={() => setOpenSettings(true)}
               disabled={processing}
             >
@@ -221,6 +223,9 @@ export default function Create() {
           </Dialog.Trigger>
           <Dialog.Content maxWidth="380px">
             <Dialog.Title>{t("archiveOptions")}</Dialog.Title>
+            <Dialog.Description size="2" color="gray">
+              {t("currentCreateFeature")}
+            </Dialog.Description>
             <Flex direction="column" gap="3" mt="2">
               <Flex direction="column" gap="1">
                 <Text size="2" weight="medium">
@@ -230,7 +235,7 @@ export default function Create() {
                   defaultValue={compression}
                   onValueChange={(e) => setCompression(e as Compression)}
                 >
-                  <Select.Trigger />
+                  <Select.Trigger aria-label={t("compression")} />
                   <Select.Content>
                     {COMPRESSION.map((it) => (
                       <Select.Item key={it} value={it}>
@@ -248,7 +253,7 @@ export default function Create() {
                   defaultValue={encryption}
                   onValueChange={(e) => setEncryption(e as Encryption)}
                 >
-                  <Select.Trigger />
+                  <Select.Trigger aria-label={t("encryption")} />
                   <Select.Content>
                     {ENCRYPTION.map((it) => (
                       <Select.Item key={it} value={it}>
@@ -264,6 +269,7 @@ export default function Create() {
                 </Text>
                 <TextField.Root
                   type="password"
+                  aria-label={t("password")}
                   size="2"
                   disabled={encryption === "none"}
                   onChange={(e) => setPassword(e.target.value)}

@@ -35,6 +35,9 @@ crate-type = ["staticlib", "cdylib", "lib"]
 tauri-plugin-cli = "2"
 tauri-plugin-updater = "2"
 
+[dev-dependencies]
+tempfile = "3"
+
 # https://github.com/tauri-apps/tauri/issues/11496#issuecomment-2444638417
 [profile.dev.package.objc2]
 debug-assertions = false

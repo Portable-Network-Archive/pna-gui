@@ -8,9 +8,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test:matrix": "node scripts/verify-state-matrix.mjs",
+    "test:unit": "vitest run",
+    "test:browser": "playwright test -c playwright-ct.config.ts",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --all-features",
+    "test:ci": "npm run test:matrix && npm run test:unit && npm run test:rust",
     "tauri": "tauri",
-    "format": "prettier --write './src/**/*.{js,jsx,ts,tsx,json,css}'",
-    "format:check": "prettier --check './src/**/*.{js,jsx,ts,tsx,json,css}'",
+    "format": "prettier --write './{src,tests,playwright,scripts}/**/*.{js,mjs,jsx,ts,tsx,json,css}' './*.{js,mjs,ts}'",
+    "format:check": "prettier --check './{src,tests,playwright,scripts}/**/*.{js,mjs,jsx,ts,tsx,json,css}' './*.{js,mjs,ts}'",
     "format:rust": "cd src-tauri && cargo fmt --all",
     "format:rust:check": "cd src-tauri && cargo fmt --all --check"
   },
@@ -28,13 +33,20 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@playwright/experimental-ct-react": "^1.61.1",
     "@tauri-apps/cli": "^2.11.3",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^22.15.19",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "16.2.9",
+    "jsdom": "^26.1.0",
     "prettier": "^3.8.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
   }
 }

@@ -214,8 +214,9 @@ impl ReaderState {
 
     fn remember(&self, summary: &ArchiveSummary) -> Result<(), AppErrorDto> {
         let mut recent = self.recent.lock().map_err(|_| AppErrorDto::internal())?;
-        recent.retain(|item| item.path != summary.path);
-        recent.insert(
+        let mut next = recent.clone();
+        next.retain(|item| item.path != summary.path);
+        next.insert(
             0,
             ArchiveRecent {
                 path: summary.path.clone(),
@@ -225,8 +226,10 @@ impl ReaderState {
                 last_opened_at: unix_now(),
             },
         );
-        recent.truncate(MAX_RECENT_ITEMS);
-        persist_recent(&self.recent_path, &recent)
+        next.truncate(MAX_RECENT_ITEMS);
+        persist_recent(&self.recent_path, &next)?;
+        *recent = next;
+        Ok(())
     }
 }
 
@@ -251,8 +254,10 @@ pub(crate) fn recent_remove(
     path: String,
 ) -> Result<Vec<ArchiveRecent>, AppErrorDto> {
     let mut recent = state.recent.lock().map_err(|_| AppErrorDto::internal())?;
-    recent.retain(|item| item.path != path);
-    persist_recent(&state.recent_path, &recent)?;
+    let mut next = recent.clone();
+    next.retain(|item| item.path != path);
+    persist_recent(&state.recent_path, &next)?;
+    *recent = next;
     Ok(recent.clone())
 }
 
@@ -282,12 +287,12 @@ pub(crate) async fn archive_open(
         summary: summary.clone(),
         entries,
     };
+    state.remember(&summary)?;
     state
         .sessions
         .lock()
         .map_err(|_| AppErrorDto::internal())?
         .insert(handle.clone(), session);
-    state.remember(&summary)?;
     Ok(OpenArchiveResult { handle, summary })
 }
 
@@ -869,9 +874,11 @@ mod tests {
     use std::process::Command;
 
     use libpna::{EntryBuilder, EntryName, WriteOptions};
+    use tempfile::tempdir;
 
     #[test]
     fn hierarchy_adds_implicit_directories() {
+        // BE-INDEX-IMPLICIT-DIRS, BE-INDEX-PARENT-IDS, BE-INDEX-HAS-CHILDREN
         let mut entries = BTreeMap::new();
         insert_parent_directories(&mut entries, "docs/specs/readme.md");
         assert!(entries.contains_key("docs"));
@@ -891,6 +898,7 @@ mod tests {
 
     #[test]
     fn page_caps_requested_limit() {
+        // BE-PAGE-MAX-LIMIT, BE-PAGE-NEXT-CURSOR
         let item = |index: usize| IndexedEntry {
             dto: ArchiveEntryDto {
                 id: format!("entry-{index}"),
@@ -919,6 +927,7 @@ mod tests {
 
     #[test]
     fn reads_normal_archive_and_text_preview() {
+        // BE-OPEN-NORMAL, BE-INDEX-SUMMARY, BE-PREVIEW-TEXT
         let path = test_archive_path("normal");
         write_test_archive(&path, false, false);
         let (summary, entries) = build_index("test-normal", &path, None).unwrap();
@@ -943,6 +952,8 @@ mod tests {
 
     #[test]
     fn solid_encrypted_archive_requires_correct_password() {
+        // BE-OPEN-SOLID, BE-OPEN-PASSWORD-REQUIRED, BE-OPEN-WRONG-PASSWORD,
+        // BE-OPEN-CORRECT-PASSWORD
         let path = test_archive_path("solid-encrypted");
         write_test_archive(&path, true, true);
         assert_eq!(
@@ -1016,6 +1027,283 @@ mod tests {
 
         fs::remove_file(normal).unwrap();
         fs::remove_file(encrypted).unwrap();
+    }
+
+    #[test]
+    fn paging_sorting_and_filtering_cover_boundary_states() {
+        // BE-PAGE-DEFAULT, BE-PAGE-MIN-LIMIT, BE-PAGE-INVALID-CURSOR,
+        // BE-PAGE-PAST-END, BE-SORT-NAME-ASC, BE-SORT-NAME-DESC,
+        // BE-SORT-SIZE, BE-SORT-KIND, BE-SORT-DIRECTORIES-FIRST,
+        // BE-FILTER-NONE, BE-FILTER-EMPTY, BE-FILTER-KIND
+        let directory = indexed("dir", "directory", None, None, None);
+        let alpha = indexed("Alpha.txt", "file", Some(2), Some(1), Some(20));
+        let beta = indexed("beta.txt", "file", Some(1), Some(2), Some(10));
+        let items = vec![beta.clone(), directory.clone(), alpha.clone()];
+
+        let default_page = page(items.clone(), None, None, None);
+        assert_eq!(default_page.total_count, 3);
+        assert_eq!(default_page.items[0].kind, "directory");
+
+        let min_page = page(items.clone(), None, Some(0), None);
+        assert_eq!(min_page.items.len(), 1);
+        let invalid = page(items.clone(), Some("bad".into()), Some(2), None);
+        assert_eq!(invalid.items.len(), 2);
+        let past_end = page(items.clone(), Some("999".into()), Some(2), None);
+        assert!(past_end.items.is_empty());
+        assert!(past_end.next_cursor.is_none());
+
+        let asc = page(items.clone(), None, None, Some(sort("name", "asc")));
+        assert_eq!(names(&asc), ["dir", "Alpha.txt", "beta.txt"]);
+        let desc = page(items.clone(), None, None, Some(sort("name", "desc")));
+        assert_eq!(names(&desc), ["dir", "beta.txt", "Alpha.txt"]);
+        let size = page(
+            items.clone(),
+            None,
+            None,
+            Some(sort("originalBytes", "asc")),
+        );
+        assert_eq!(names(&size), ["dir", "beta.txt", "Alpha.txt"]);
+        let kind = page(items.clone(), None, None, Some(sort("kind", "asc")));
+        assert_eq!(kind.items[0].kind, "directory");
+
+        assert!(items.iter().all(|item| matches_filter(item, None)));
+        let empty_filter = EntryFilter {
+            kinds: Some(Vec::new()),
+        };
+        assert!(items
+            .iter()
+            .all(|item| matches_filter(item, Some(&empty_filter))));
+        let files_only = EntryFilter {
+            kinds: Some(vec!["file".into()]),
+        };
+        assert_eq!(
+            items
+                .iter()
+                .filter(|item| matches_filter(item, Some(&files_only)))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn preview_covers_non_file_unsupported_binary_and_truncated_states() {
+        // BE-PREVIEW-NON-FILE, BE-PREVIEW-UNSUPPORTED-TYPE,
+        // BE-PREVIEW-BINARY, BE-PREVIEW-TRUNCATED, BE-PREVIEW-NOT-FOUND
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("preview.pna");
+        write_entries_archive(
+            &path,
+            &[
+                ("folder", None),
+                ("image.png", Some(b"png")),
+                ("binary.txt", Some(b"a\0b")),
+                ("long.txt", Some(b"abcdef")),
+            ],
+        );
+        let (summary, entries) = build_index("preview", &path, None).unwrap();
+        let session = ArchiveSession {
+            path,
+            password: None,
+            summary,
+            entries: entries.clone(),
+        };
+        let by_path = |path: &str| entries.iter().find(|entry| entry.dto.path == path).unwrap();
+
+        assert_eq!(
+            preview_entry(&session, by_path("folder"), 4)
+                .unwrap()
+                .message_code,
+            Some("SELECT_FILE")
+        );
+        assert_eq!(
+            preview_entry(&session, by_path("image.png"), 4)
+                .unwrap()
+                .message_code,
+            Some("UNSUPPORTED_TYPE")
+        );
+        assert_eq!(
+            preview_entry(&session, by_path("binary.txt"), 4)
+                .unwrap()
+                .message_code,
+            Some("BINARY_DATA")
+        );
+        let truncated = preview_entry(&session, by_path("long.txt"), 3).unwrap();
+        assert!(truncated.truncated);
+        assert_eq!(truncated.text.as_deref(), Some("abc"));
+        assert_eq!(truncated.message_code, Some("TRUNCATED"));
+
+        let missing = indexed("missing.txt", "file", Some(1), Some(1), None);
+        assert_eq!(
+            preview_entry(&session, &missing, 4).unwrap_err().code,
+            "PATH_NOT_FOUND"
+        );
+    }
+
+    #[test]
+    fn recent_items_are_loaded_deduplicated_capped_and_persisted_atomically() {
+        // BE-RECENT-EMPTY, BE-RECENT-LOAD, BE-RECENT-DEDUPE,
+        // BE-RECENT-CAP, BE-RECENT-PERSIST, BE-RECENT-PERSIST-FAILURE
+        let temp = tempdir().unwrap();
+        let recent_path = temp.path().join("state/recent.json");
+        let state = ReaderState::new(recent_path.clone());
+        assert!(state.recent.lock().unwrap().is_empty());
+
+        for index in 0..12 {
+            state.remember(&summary(&format!("/{index}.pna"))).unwrap();
+        }
+        state.remember(&summary("/11.pna")).unwrap();
+        let recent = state.recent.lock().unwrap().clone();
+        assert_eq!(recent.len(), MAX_RECENT_ITEMS);
+        assert_eq!(recent[0].path, "/11.pna");
+        assert_eq!(
+            recent.iter().filter(|item| item.path == "/11.pna").count(),
+            1
+        );
+        assert_eq!(
+            ReaderState::new(recent_path).recent.lock().unwrap().len(),
+            10
+        );
+
+        let impossible = ReaderState::new(temp.path().join("file/recent.json"));
+        fs::write(temp.path().join("file"), b"not a directory").unwrap();
+        assert_eq!(
+            impossible
+                .remember(&summary("/failure.pna"))
+                .unwrap_err()
+                .code,
+            "INTERNAL_ERROR"
+        );
+        assert!(impossible.recent.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn open_and_archive_error_mapping_covers_public_error_states() {
+        // BE-ERROR-NOT-FOUND, BE-ERROR-PERMISSION, BE-ERROR-IO,
+        // BE-ERROR-CORRUPT, BE-ERROR-WRONG-PASSWORD, BE-OPEN-DIRECTORY
+        assert_eq!(
+            map_open_error(io::Error::from(io::ErrorKind::NotFound)).code,
+            "PATH_NOT_FOUND"
+        );
+        assert_eq!(
+            map_open_error(io::Error::from(io::ErrorKind::PermissionDenied)).code,
+            "PERMISSION_DENIED"
+        );
+        assert_eq!(
+            map_open_error(io::Error::from(io::ErrorKind::Other)).code,
+            "IO_ERROR"
+        );
+        assert_eq!(
+            map_archive_error(io::Error::from(io::ErrorKind::InvalidData), false).code,
+            "ARCHIVE_CORRUPT"
+        );
+        assert_eq!(
+            map_archive_error(io::Error::from(io::ErrorKind::InvalidData), true).code,
+            "WRONG_PASSWORD"
+        );
+        let temp = tempdir().unwrap();
+        assert_eq!(
+            build_index("directory", temp.path(), None)
+                .unwrap_err()
+                .code,
+            "INVALID_ARGUMENT"
+        );
+    }
+
+    #[test]
+    fn domain_value_mappings_cover_supported_states() {
+        // BE-KIND-FILE, BE-KIND-DIRECTORY, BE-KIND-SYMLINK, BE-KIND-HARDLINK,
+        // BE-COMPRESSION-STORE, BE-COMPRESSION-DEFLATE,
+        // BE-COMPRESSION-ZSTD, BE-COMPRESSION-XZ,
+        // BE-ENCRYPTION-NONE, BE-ENCRYPTION-AES, BE-ENCRYPTION-CAMELLIA,
+        // BE-TEXT-PREVIEW-SUPPORTED, BE-TEXT-PREVIEW-UNSUPPORTED
+        assert_eq!(kind_name(DataKind::File), "file");
+        assert_eq!(kind_name(DataKind::Directory), "directory");
+        assert_eq!(kind_name(DataKind::SymbolicLink), "symlink");
+        assert_eq!(kind_name(DataKind::HardLink), "hardlink");
+        assert_eq!(compression_name(Compression::No), "Store");
+        assert_eq!(compression_name(Compression::Deflate), "Deflate");
+        assert_eq!(compression_name(Compression::ZStandard), "Zstandard");
+        assert_eq!(compression_name(Compression::XZ), "XZ");
+        assert_eq!(encryption_name(Encryption::No), "None");
+        assert_eq!(encryption_name(Encryption::Aes), "AES");
+        assert_eq!(encryption_name(Encryption::Camellia), "Camellia");
+        assert!(is_text_preview("README.MD"));
+        assert!(!is_text_preview("photo.png"));
+    }
+
+    fn indexed(
+        name: &str,
+        kind: &str,
+        original_bytes: Option<u64>,
+        stored_bytes: Option<u64>,
+        modified_at: Option<i64>,
+    ) -> IndexedEntry {
+        IndexedEntry {
+            dto: ArchiveEntryDto {
+                id: format!("entry-{name}"),
+                parent_id: None,
+                path: name.into(),
+                name: name.into(),
+                kind: kind.into(),
+                original_bytes,
+                stored_bytes,
+                compression: None,
+                encryption: None,
+                modified_at,
+                has_children: false,
+            },
+            created_at: None,
+            accessed_at: None,
+            permission: None,
+            owner: None,
+            group: None,
+            xattr_count: 0,
+        }
+    }
+
+    fn sort(field: &str, direction: &str) -> SortSpec {
+        SortSpec {
+            field: Some(field.into()),
+            direction: Some(direction.into()),
+        }
+    }
+
+    fn names(page: &ArchiveEntryPage) -> Vec<&str> {
+        page.items.iter().map(|item| item.name.as_str()).collect()
+    }
+
+    fn summary(path: &str) -> ArchiveSummary {
+        ArchiveSummary {
+            handle: "test".into(),
+            path: path.into(),
+            display_name: entry_name(path),
+            entry_count: 1,
+            original_bytes: 1,
+            stored_bytes: 1,
+            compression_methods: vec!["Store".into()],
+            encryption_methods: vec!["None".into()],
+            solid: false,
+            file_modified_at: None,
+        }
+    }
+
+    fn write_entries_archive(path: &Path, entries: &[(&str, Option<&[u8]>)]) {
+        let file = fs::File::create(path).unwrap();
+        let mut archive = Archive::write_header(file).unwrap();
+        for (name, content) in entries {
+            let entry = if let Some(content) = content {
+                let mut builder =
+                    EntryBuilder::new_file(EntryName::from(*name), WriteOptions::store()).unwrap();
+                builder.write_all(content).unwrap();
+                builder.build().unwrap()
+            } else {
+                EntryBuilder::new_dir(EntryName::from(*name))
+                    .build()
+                    .unwrap()
+            };
+            archive.add_entry(entry).unwrap();
+        }
+        archive.finalize().unwrap();
     }
 
     fn test_archive_path(label: &str) -> PathBuf {

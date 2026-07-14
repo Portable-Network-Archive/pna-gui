@@ -33,6 +33,9 @@ dist-ssr
 
 # testing
 /coverage
+/playwright/.cache/
+/test-results/
+/playwright-report/
 
 # next.js
 /.next/

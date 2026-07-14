@@ -39,6 +39,7 @@ const ENGLISH = {
   dropFiles: "Drop files here",
   browseFiles: "or click to browse",
   addMoreFiles: "Drop more files or click to add",
+  removeFile: "Remove file",
   archiveOptions: "Archive options",
   solidMode: "Solid mode",
   done: "Done",
@@ -154,6 +155,7 @@ const JAPANESE: Record<TranslationKey, string> = {
   dropFiles: "ファイルをここにドロップ",
   browseFiles: "またはクリックして選択",
   addMoreFiles: "追加のファイルをドロップ、またはクリックして追加",
+  removeFile: "ファイルを削除",
   archiveOptions: "アーカイブ設定",
   solidMode: "Solidモード",
   done: "完了",
@@ -255,6 +257,13 @@ export function resolveLocale(languages: readonly string[]): SupportedLocale {
   return languages[0]?.toLowerCase().split("-")[0] === "ja" ? "ja" : "en";
 }
 
+export function translate(
+  locale: SupportedLocale,
+  key: TranslationKey,
+): string {
+  return (locale === "ja" ? JAPANESE : ENGLISH)[key];
+}
+
 function subscribeToLanguageChange(onStoreChange: () => void): () => void {
   window.addEventListener("languagechange", onStoreChange);
   return () => window.removeEventListener("languagechange", onStoreChange);
@@ -277,9 +286,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     document.documentElement.lang = locale;
   }, [locale]);
 
-  const dictionary = locale === "ja" ? JAPANESE : ENGLISH;
   return (
-    <I18nContext.Provider value={{ locale, t: (key) => dictionary[key] }}>
+    <I18nContext.Provider
+      value={{ locale, t: (key) => translate(locale, key) }}
+    >
       {children}
     </I18nContext.Provider>
   );
