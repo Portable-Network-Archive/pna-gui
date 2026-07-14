@@ -199,13 +199,15 @@ describe("application shell", () => {
   it("[UI-BROWSER-TREE] renders a bounded folder icon, visible tree label, and null metadata", async () => {
     await openRecentArchive();
     const tree = screen.getByLabelText("Archive tree");
-    const folderButton = within(tree).getByRole("button", { name: "src" });
+    const folderButton = await within(tree).findByRole("button", {
+      name: "src",
+    });
     const icon = folderButton.querySelector("svg");
     expect(folderButton).toHaveTextContent("src");
     expect(icon).toHaveAttribute("width", "16");
     expect(icon).toHaveAttribute("height", "16");
 
-    const row = screen.getByRole("row", { name: /src Folder/ });
+    const row = await screen.findByRole("row", { name: /src Folder/ });
     expect(row).not.toHaveTextContent("NaN");
     expect(row).not.toHaveTextContent("1970");
     expect(within(row).getAllByText("—")).toHaveLength(5);

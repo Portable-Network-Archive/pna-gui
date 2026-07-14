@@ -1,7 +1,7 @@
 {
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build:release",
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000"
   },
@@ -56,9 +56,9 @@
       "iconPath": "icons/icon.ico",
       "showMenuOnLeftClick": true
     },
-    "macOSPrivateApi": true,
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": ["migrated", "desktop-capability"]
     },
     "windows": [
       {

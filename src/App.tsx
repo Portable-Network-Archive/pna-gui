@@ -25,6 +25,7 @@ import {
 import { getMatches } from "@tauri-apps/plugin-cli";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Create } from "./tabs";
+import { registerE2eBridge } from "@pna/e2e-bridge";
 import { archiveApi, normalizeAppError } from "./features/archive/api";
 import { ArchiveTreeRow, FolderGlyph } from "./features/archive/ArchiveTreeRow";
 import {
@@ -57,6 +58,8 @@ import type {
   SortSpec,
 } from "./features/archive/types";
 import styles from "./App.module.css";
+
+registerE2eBridge();
 
 type AppView = "home" | "browser" | "create";
 type TreePages = Record<string, ArchiveEntry[]>;
@@ -365,7 +368,7 @@ function HomeView({
   const selected = recent.find((item) => item.path === selectedPath);
 
   return (
-    <div className={styles.shell}>
+    <div className={styles.shell} data-testid="home-view">
       <AppToolbar title={productName} onOpen={onOpen} onCreate={onCreate} />
       {error && <ErrorBanner error={error} onDismiss={onDismissError} />}
       <div className={styles.workspace}>
@@ -679,10 +682,11 @@ function BrowserView({
   };
 
   return (
-    <div className={styles.shell}>
+    <div className={styles.shell} data-testid="archive-browser">
       <header className={styles.toolbar}>
         <button
           className={styles.brandButton}
+          data-testid="archive-home"
           onClick={onHome}
           title={t("backHome")}
         >
@@ -704,6 +708,7 @@ function BrowserView({
         >
           <MagnifyingGlassIcon />
           <input
+            data-testid="archive-search"
             aria-label={t("searchArchive")}
             placeholder={t("searchPlaceholder")}
             value={queryInput}
@@ -726,7 +731,11 @@ function BrowserView({
       </header>
       {error && <ErrorBanner error={error} onDismiss={onDismissError} />}
       <div className={styles.browserWorkspace}>
-        <aside className={styles.treeSidebar} aria-label={t("archiveTree")}>
+        <aside
+          className={styles.treeSidebar}
+          aria-label={t("archiveTree")}
+          data-testid="archive-tree"
+        >
           <div className={styles.sidebarTitle}>{t("folders")}</div>
           <button
             className={styles.treeRoot}
@@ -860,6 +869,7 @@ function BrowserView({
                 {items.map((entry) => (
                   <tr
                     key={entry.id}
+                    data-entry-path={entry.path}
                     className={
                       selectedId === entry.id ? styles.selectedRow : undefined
                     }
@@ -1074,7 +1084,9 @@ function Inspector({
               </div>
             )}
             {preview?.kind === "text" && (
-              <pre className={styles.textPreview}>{preview.text}</pre>
+              <pre className={styles.textPreview} data-testid="archive-preview">
+                {preview.text}
+              </pre>
             )}
             {preview?.kind === "unsupported" && (
               <div className={styles.previewUnavailable}>

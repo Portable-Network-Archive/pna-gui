@@ -9,6 +9,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@pna/e2e-bridge": fileURLToPath(
+        new URL("./src/testing/e2e-bridge.ts", import.meta.url),
+      ),
     },
   },
   test: {

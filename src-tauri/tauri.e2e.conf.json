@@ -1,0 +1,19 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "migrated",
+        "desktop-capability",
+        {
+          "identifier": "e2e-automation",
+          "windows": ["main"],
+          "permissions": ["wdio:default", "wdio-webdriver:default"]
+        }
+      ]
+    }
+  }
+}
