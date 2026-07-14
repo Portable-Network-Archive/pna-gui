@@ -4,8 +4,9 @@ mod reader;
 mod utils;
 
 use std::{
-    fs, io,
-    path::{Path, PathBuf},
+    fs::{self, OpenOptions},
+    io,
+    path::{Component, Path, PathBuf},
 };
 
 use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
@@ -53,7 +54,7 @@ async fn extract(
     event: String,
     path: &str,
     password: Option<String>,
-    out_dir: Option<PathBuf>,
+    out_dir: PathBuf,
 ) -> tauri::Result<()> {
     if password.is_none() && utils::is_encrypted(path)? {
         return Err(tauri::Error::Io(io::Error::other("encrypted")));
@@ -61,7 +62,7 @@ async fn extract(
     Ok(_extract(
         path.as_ref(),
         password.as_deref(),
-        out_dir.as_deref(),
+        &out_dir,
         |e, name| match e {
             Event::Start => (),
             Event::Finish => open::that(name).unwrap(),
@@ -233,7 +234,7 @@ where
 fn _extract<OnChangeArchive, OnChangeEntry>(
     path: &Path,
     password: Option<&str>,
-    out_dir: Option<&Path>,
+    out_dir: &Path,
     on_change_archive: OnChangeArchive,
     on_change_entry: OnChangeEntry,
 ) -> io::Result<()>
@@ -242,34 +243,134 @@ where
     OnChangeArchive: Fn(Event, &Path),
 {
     let file_name: &Path = path.file_stem().unwrap_or("pna".as_ref()).as_ref();
-    let out_dir = if let Some(dir) = out_dir {
-        dir.join(file_name)
-    } else if let Some(parent) = path.parent() {
-        parent.join(file_name)
-    } else {
-        file_name.to_owned()
-    };
+    fs::create_dir_all(out_dir)?;
+    let canonical_selected = fs::canonicalize(out_dir)?;
+    let root_name = safe_relative_entry_path(file_name)?;
+    create_safe_directory(out_dir, &canonical_selected, &root_name)?;
+    let out_dir = out_dir.join(root_name);
+    let canonical_root = fs::canonicalize(&out_dir)?;
     on_change_archive(Event::Start, &out_dir);
     let file = fs::File::open(path)?;
     let mut archive = libpna::Archive::read_header(file)?;
     for entry in archive.entries_with_password(password.map(str::as_bytes)) {
         let entry = entry?;
-        if libpna::DataKind::File != entry.header().data_kind() {
-            continue;
-        }
         let name = entry.header().path().as_path();
-        on_change_entry(Event::Start, name);
-        let out_path = out_dir.join(name);
-        if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent)?;
+        let relative = safe_relative_entry_path(name)?;
+        match entry.header().data_kind() {
+            libpna::DataKind::Directory => {
+                create_safe_directory(&out_dir, &canonical_root, &relative)?;
+            }
+            libpna::DataKind::File => {
+                on_change_entry(Event::Start, name);
+                let out_path = prepare_safe_file_path(&out_dir, &canonical_root, &relative)?;
+                let mut writer = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(out_path)?;
+                let mut reader = entry.reader(libpna::ReadOptions::with_password(password))?;
+                io::copy(&mut reader, &mut writer)?;
+                on_change_entry(Event::Finish, name);
+            }
+            libpna::DataKind::SymbolicLink | libpna::DataKind::HardLink => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "archive links are not extracted",
+                ));
+            }
         }
-        let mut writer = fs::File::create(out_path)?;
-        let mut reader = entry.reader(libpna::ReadOptions::with_password(password))?;
-        io::copy(&mut reader, &mut writer)?;
-        on_change_entry(Event::Finish, name);
     }
     on_change_archive(Event::Finish, &out_dir);
     Ok(())
+}
+
+fn safe_relative_entry_path(name: &Path) -> io::Result<PathBuf> {
+    let raw = name.to_string_lossy();
+    if raw.is_empty() || raw.contains('\\') || raw.contains(':') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "archive entry path is not portable",
+        ));
+    }
+    let mut relative = PathBuf::new();
+    for component in name.components() {
+        match component {
+            Component::Normal(value) => relative.push(value),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "archive entry path escapes the destination",
+                ));
+            }
+        }
+    }
+    if relative.as_os_str().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "archive entry path is empty",
+        ));
+    }
+    Ok(relative)
+}
+
+fn create_safe_directory(root: &Path, canonical_root: &Path, relative: &Path) -> io::Result<()> {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        if matches!(component, Component::CurDir) {
+            continue;
+        }
+        let Component::Normal(value) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "archive entry path escapes the destination",
+            ));
+        };
+        current.push(value);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "destination contains a symbolic link",
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "destination component is not a directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&current)?,
+            Err(error) => return Err(error),
+        }
+        let canonical = fs::canonicalize(&current)?;
+        if !canonical.starts_with(canonical_root) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "destination path escapes the selected folder",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn prepare_safe_file_path(
+    root: &Path,
+    canonical_root: &Path,
+    relative: &Path,
+) -> io::Result<PathBuf> {
+    let parent = relative.parent().unwrap_or_else(|| Path::new("."));
+    create_safe_directory(root, canonical_root, parent)?;
+    let out_path = root.join(relative);
+    if let Ok(metadata) = fs::symlink_metadata(&out_path) {
+        if metadata.file_type().is_symlink() || metadata.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "destination file is not a regular file",
+            ));
+        }
+    }
+    Ok(out_path)
 }
 
 const MENU_UPDATE_CHECK: &str = "update check";
@@ -457,4 +558,380 @@ pub fn run() {
         ])
         .run(context)
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    use libpna::{EntryReference, ReadOptions};
+    use tempfile::tempdir;
+
+    const CREATE_CASES: [(&str, bool, Compression, Encryption); 24] = [
+        (
+            "BE-CREATE-NONE-NONE-NORMAL",
+            false,
+            Compression::None,
+            Encryption::None,
+        ),
+        (
+            "BE-CREATE-NONE-NONE-SOLID",
+            true,
+            Compression::None,
+            Encryption::None,
+        ),
+        (
+            "BE-CREATE-NONE-AES-NORMAL",
+            false,
+            Compression::None,
+            Encryption::Aes,
+        ),
+        (
+            "BE-CREATE-NONE-AES-SOLID",
+            true,
+            Compression::None,
+            Encryption::Aes,
+        ),
+        (
+            "BE-CREATE-NONE-CAMELLIA-NORMAL",
+            false,
+            Compression::None,
+            Encryption::Camellia,
+        ),
+        (
+            "BE-CREATE-NONE-CAMELLIA-SOLID",
+            true,
+            Compression::None,
+            Encryption::Camellia,
+        ),
+        (
+            "BE-CREATE-ZLIB-NONE-NORMAL",
+            false,
+            Compression::Zlib,
+            Encryption::None,
+        ),
+        (
+            "BE-CREATE-ZLIB-NONE-SOLID",
+            true,
+            Compression::Zlib,
+            Encryption::None,
+        ),
+        (
+            "BE-CREATE-ZLIB-AES-NORMAL",
+            false,
+            Compression::Zlib,
+            Encryption::Aes,
+        ),
+        (
+            "BE-CREATE-ZLIB-AES-SOLID",
+            true,
+            Compression::Zlib,
+            Encryption::Aes,
+        ),
+        (
+            "BE-CREATE-ZLIB-CAMELLIA-NORMAL",
+            false,
+            Compression::Zlib,
+            Encryption::Camellia,
+        ),
+        (
+            "BE-CREATE-ZLIB-CAMELLIA-SOLID",
+            true,
+            Compression::Zlib,
+            Encryption::Camellia,
+        ),
+        (
+            "BE-CREATE-ZSTD-NONE-NORMAL",
+            false,
+            Compression::ZStandard,
+            Encryption::None,
+        ),
+        (
+            "BE-CREATE-ZSTD-NONE-SOLID",
+            true,
+            Compression::ZStandard,
+            Encryption::None,
+        ),
+        (
+            "BE-CREATE-ZSTD-AES-NORMAL",
+            false,
+            Compression::ZStandard,
+            Encryption::Aes,
+        ),
+        (
+            "BE-CREATE-ZSTD-AES-SOLID",
+            true,
+            Compression::ZStandard,
+            Encryption::Aes,
+        ),
+        (
+            "BE-CREATE-ZSTD-CAMELLIA-NORMAL",
+            false,
+            Compression::ZStandard,
+            Encryption::Camellia,
+        ),
+        (
+            "BE-CREATE-ZSTD-CAMELLIA-SOLID",
+            true,
+            Compression::ZStandard,
+            Encryption::Camellia,
+        ),
+        (
+            "BE-CREATE-XZ-NONE-NORMAL",
+            false,
+            Compression::XZ,
+            Encryption::None,
+        ),
+        (
+            "BE-CREATE-XZ-NONE-SOLID",
+            true,
+            Compression::XZ,
+            Encryption::None,
+        ),
+        (
+            "BE-CREATE-XZ-AES-NORMAL",
+            false,
+            Compression::XZ,
+            Encryption::Aes,
+        ),
+        (
+            "BE-CREATE-XZ-AES-SOLID",
+            true,
+            Compression::XZ,
+            Encryption::Aes,
+        ),
+        (
+            "BE-CREATE-XZ-CAMELLIA-NORMAL",
+            false,
+            Compression::XZ,
+            Encryption::Camellia,
+        ),
+        (
+            "BE-CREATE-XZ-CAMELLIA-SOLID",
+            true,
+            Compression::XZ,
+            Encryption::Camellia,
+        ),
+    ];
+
+    #[test]
+    fn create_roundtrips_every_supported_option_state() {
+        for (case_id, solid, compression, encryption) in CREATE_CASES {
+            let temp = tempdir().unwrap();
+            let input = temp.path().join("input.txt");
+            fs::write(&input, case_id).unwrap();
+            let password = (!matches!(encryption, Encryption::None)).then(|| "secret".to_string());
+            let name = format!("{case_id}.pna");
+            let archive_events = std::sync::Mutex::new(Vec::new());
+            let entry_events = std::sync::Mutex::new(Vec::new());
+
+            _create(
+                &name,
+                vec![input],
+                temp.path(),
+                PnaOption {
+                    solid,
+                    compression,
+                    encryption,
+                    password: password.clone(),
+                },
+                |event, _| {
+                    archive_events
+                        .lock()
+                        .unwrap()
+                        .push(matches!(event, Event::Finish))
+                },
+                |event, _| {
+                    entry_events
+                        .lock()
+                        .unwrap()
+                        .push(matches!(event, Event::Finish))
+                },
+            )
+            .unwrap_or_else(|error| panic!("{case_id}: {error}"));
+
+            let file = fs::File::open(temp.path().join(&name)).unwrap();
+            let mut archive = Archive::read_header(file).unwrap();
+            let mut entries = archive.entries_with_password(password.as_deref().map(str::as_bytes));
+            let entry = entries.next().unwrap().unwrap();
+            let mut content = String::new();
+            entry
+                .reader(ReadOptions::with_password(password.as_deref()))
+                .unwrap()
+                .read_to_string(&mut content)
+                .unwrap();
+            assert_eq!(content, case_id, "{case_id}");
+            assert!(entries.next().is_none(), "{case_id}");
+            assert_eq!(*archive_events.lock().unwrap(), [false, true], "{case_id}");
+            assert_eq!(*entry_events.lock().unwrap(), [false, true], "{case_id}");
+        }
+    }
+
+    #[test]
+    fn extract_requires_a_selected_destination_and_preserves_source() {
+        // State coverage: BE-EXTRACT-DESTINATION, BE-EXTRACT-NESTED,
+        // BE-EXTRACT-SOURCE-UNCHANGED, BE-EXTRACT-EVENTS.
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("sample.pna");
+        write_file_archive(&archive_path, "nested/file.txt", b"payload");
+        let source_bytes = fs::read(&archive_path).unwrap();
+        let source_modified = fs::metadata(&archive_path).unwrap().modified().unwrap();
+        let selected = temp.path().join("selected");
+        let archive_events = std::sync::Mutex::new(Vec::new());
+        let entry_events = std::sync::Mutex::new(Vec::new());
+
+        _extract(
+            &archive_path,
+            None,
+            &selected,
+            |event, _| {
+                archive_events
+                    .lock()
+                    .unwrap()
+                    .push(matches!(event, Event::Finish))
+            },
+            |event, _| {
+                entry_events
+                    .lock()
+                    .unwrap()
+                    .push(matches!(event, Event::Finish))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(selected.join("sample/nested/file.txt")).unwrap(),
+            b"payload"
+        );
+        assert_eq!(fs::read(&archive_path).unwrap(), source_bytes);
+        assert_eq!(
+            fs::metadata(&archive_path).unwrap().modified().unwrap(),
+            source_modified
+        );
+        assert_eq!(*archive_events.lock().unwrap(), [false, true]);
+        assert_eq!(*entry_events.lock().unwrap(), [false, true]);
+    }
+
+    #[test]
+    fn extraction_rejects_nonportable_and_escaping_paths() {
+        for (case_id, path) in [
+            ("BE-SEC-EXTRACT-PARENT", "../escape.txt"),
+            ("BE-SEC-EXTRACT-ABSOLUTE", "/tmp/escape.txt"),
+            ("BE-SEC-EXTRACT-WINDOWS-DRIVE", "C:/escape.txt"),
+            ("BE-SEC-EXTRACT-WINDOWS-SEPARATOR", "dir\\escape.txt"),
+            ("BE-SEC-EXTRACT-EMPTY", ""),
+        ] {
+            assert!(
+                safe_relative_entry_path(Path::new(path)).is_err(),
+                "{case_id}: {path}"
+            );
+        }
+        assert_eq!(
+            safe_relative_entry_path(Path::new("nested/file.txt")).unwrap(),
+            Path::new("nested/file.txt"),
+            "BE-SEC-EXTRACT-NESTED-SAFE"
+        );
+    }
+
+    #[test]
+    fn extraction_never_writes_a_traversal_entry_outside_the_destination() {
+        // State coverage: BE-SEC-EXTRACT-NO-OUTSIDE-WRITE.
+        // libpna normalizes this entry name while reading. This integration test
+        // therefore asserts the security boundary (no write outside the selected
+        // destination), while extraction_rejects_nonportable_and_escaping_paths
+        // tests the raw-path rejection policy before normalization.
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("malicious.pna");
+        write_file_archive_preserving_root(&archive_path, "../escape.txt", b"escape");
+        let selected = temp.path().join("selected");
+
+        _extract(&archive_path, None, &selected, |_, _| {}, |_, _| {}).unwrap();
+
+        assert!(!temp.path().join("escape.txt").exists());
+        assert_eq!(
+            fs::read(selected.join("malicious/escape.txt")).unwrap(),
+            b"escape"
+        );
+    }
+
+    #[test]
+    fn extraction_rejects_archive_links() {
+        for (case_id, hard_link) in [
+            ("BE-SEC-EXTRACT-SYMLINK-ENTRY", false),
+            ("BE-SEC-EXTRACT-HARDLINK-ENTRY", true),
+        ] {
+            let temp = tempdir().unwrap();
+            let archive_path = temp.path().join("links.pna");
+            let file = fs::File::create(&archive_path).unwrap();
+            let mut archive = Archive::write_header(file).unwrap();
+            let entry = if hard_link {
+                EntryBuilder::new_hard_link(EntryName::from("link"), EntryReference::from("target"))
+                    .unwrap()
+            } else {
+                EntryBuilder::new_symlink(
+                    EntryName::from("link"),
+                    EntryReference::from("../outside"),
+                )
+                .unwrap()
+            };
+            archive.add_entry(entry.build().unwrap()).unwrap();
+            archive.finalize().unwrap();
+
+            let error = _extract(
+                &archive_path,
+                None,
+                &temp.path().join("selected"),
+                |_, _| {},
+                |_, _| {},
+            )
+            .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{case_id}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extraction_rejects_a_preexisting_destination_symlink() {
+        // State coverage: BE-SEC-EXTRACT-DESTINATION-SYMLINK.
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("sample.pna");
+        write_file_archive(&archive_path, "linked/escape.txt", b"escape");
+        let selected = temp.path().join("selected");
+        let root = selected.join("sample");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join("linked")).unwrap();
+
+        let error = _extract(&archive_path, None, &selected, |_, _| {}, |_, _| {}).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(!outside.join("escape.txt").exists());
+    }
+
+    fn write_file_archive(path: &Path, name: &str, content: &[u8]) {
+        let file = fs::File::create(path).unwrap();
+        let mut archive = Archive::write_header(file).unwrap();
+        let mut entry =
+            EntryBuilder::new_file(EntryName::from(name), WriteOptions::store()).unwrap();
+        entry.write_all(content).unwrap();
+        archive.add_entry(entry.build().unwrap()).unwrap();
+        archive.finalize().unwrap();
+    }
+
+    fn write_file_archive_preserving_root(path: &Path, name: &str, content: &[u8]) {
+        let file = fs::File::create(path).unwrap();
+        let mut archive = Archive::write_header(file).unwrap();
+        let mut entry = EntryBuilder::new_file(
+            EntryName::from_utf8_preserve_root(name),
+            WriteOptions::store(),
+        )
+        .unwrap();
+        entry.write_all(content).unwrap();
+        archive.add_entry(entry.build().unwrap()).unwrap();
+        archive.finalize().unwrap();
+    }
 }

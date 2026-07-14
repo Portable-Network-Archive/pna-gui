@@ -1,22 +1,23 @@
-import { readDir, DirEntry } from "@tauri-apps/plugin-fs";
+import { join } from "@tauri-apps/api/path";
+import { readDir, type DirEntry } from "@tauri-apps/plugin-fs";
 
-const flatEntries = async (entry: DirEntry): Promise<string[]> => {
-  return new Promise(async (resolve, reject) => {
-    try {
-      resolve(
-        entry.isDirectory ? await readAllIfDir(entry.name) : [entry.name],
-      );
-    } catch (e) {
-      reject(e);
-    }
-  });
-};
+type ReadDirectory = (path: string) => Promise<DirEntry[]>;
+type JoinPath = (...paths: string[]) => Promise<string>;
 
-const readAllIfDir = async (path: string) => {
+const expandPath = async (
+  path: string,
+  readDirectory: ReadDirectory,
+  joinPath: JoinPath,
+): Promise<string[]> => {
   try {
     const files: string[] = [];
-    for (const e of await readDir(path)) {
-      files.push(...(await flatEntries(e)));
+    for (const entry of await readDirectory(path)) {
+      const fullPath = await joinPath(path, entry.name);
+      files.push(
+        ...(entry.isDirectory
+          ? await expandPath(fullPath, readDirectory, joinPath)
+          : [fullPath]),
+      );
     }
     return files;
   } catch {
@@ -24,4 +25,6 @@ const readAllIfDir = async (path: string) => {
   }
 };
 
-export { readAllIfDir };
+const readAllIfDir = (path: string) => expandPath(path, readDir, join);
+
+export { expandPath, readAllIfDir };

@@ -5,7 +5,6 @@ import {
   ArchiveIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   ClockIcon,
   Cross2Icon,
@@ -27,13 +26,25 @@ import { getMatches } from "@tauri-apps/plugin-cli";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Create } from "./tabs";
 import { archiveApi, normalizeAppError } from "./features/archive/api";
+import { ArchiveTreeRow, FolderGlyph } from "./features/archive/ArchiveTreeRow";
 import {
   formatAttributeCount,
   formatItemCount,
   I18nProvider,
   useI18n,
 } from "./features/i18n";
-import type { SupportedLocale, TranslationKey } from "./features/i18n";
+import {
+  formatBytes,
+  formatCount,
+  formatDateTime,
+  formatOptionalBytes,
+  formatOptionalDate,
+  kindLabel,
+  localizeEncryption,
+  localizeEncryptionList,
+  localizeError,
+  previewMessage,
+} from "./features/archive/presentation";
 import type {
   AppErrorDto,
   ArchiveEntry,
@@ -1004,23 +1015,15 @@ function TreeBranch({
         const isExpanded = expanded.has(entry.id);
         return (
           <div key={entry.id}>
-            <div
-              className={`${styles.treeRow} ${selectedId === entry.id ? styles.treeRowActive : ""}`}
-            >
-              <button
-                className={styles.treeToggle}
-                aria-label={`${entry.name}: ${t(isExpanded ? "collapse" : "expand")}`}
-                onClick={() => void onToggle(entry)}
-              >
-                {isExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
-              </button>
-              <button
-                className={styles.treeName}
-                onClick={() => onNavigate(entryTrail)}
-              >
-                <FolderGlyph /> {entry.name}
-              </button>
-            </div>
+            <ArchiveTreeRow
+              active={selectedId === entry.id}
+              expanded={isExpanded}
+              name={entry.name}
+              collapseLabel={t("collapse")}
+              expandLabel={t("expand")}
+              onToggle={() => void onToggle(entry)}
+              onNavigate={() => onNavigate(entryTrail)}
+            />
             {isExpanded && (
               <TreeBranch
                 parentKey={entry.id}
@@ -1221,121 +1224,4 @@ function handleEntryKey(
     event.preventDefault();
     open();
   }
-}
-
-type Translate = (key: TranslationKey) => string;
-
-function kindLabel(kind: ArchiveEntry["kind"], t: Translate): string {
-  return {
-    file: t("file"),
-    directory: t("directory"),
-    symlink: t("symlink"),
-    hardlink: t("hardlink"),
-  }[kind];
-}
-
-function formatCount(value: number, locale: SupportedLocale): string {
-  return new Intl.NumberFormat(locale).format(value);
-}
-
-function formatBytes(value: number, locale: SupportedLocale): string {
-  if (value === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const unit = Math.min(
-    Math.floor(Math.log(value) / Math.log(1024)),
-    units.length - 1,
-  );
-  const amount = value / 1024 ** unit;
-  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: unit === 0 ? 0 : 1 }).format(amount)} ${units[unit]}`;
-}
-
-function formatOptionalBytes(
-  value: number | null | undefined,
-  locale: SupportedLocale,
-): string {
-  return value == null ? "—" : formatBytes(value, locale);
-}
-
-function formatDateTime(value: number, locale: SupportedLocale): string {
-  return new Intl.DateTimeFormat(locale, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value * 1000));
-}
-
-function formatOptionalDate(
-  value: number | null | undefined,
-  locale: SupportedLocale,
-): string {
-  return value == null ? "—" : formatDateTime(value, locale);
-}
-
-function localizeEncryption(
-  value: string | null | undefined,
-  t: Translate,
-): string {
-  if (!value) return "—";
-  return value === "None" || value === "なし" ? t("none") : value;
-}
-
-function localizeEncryptionList(values: string[], t: Translate): string {
-  if (values.length === 0) return t("none");
-  return values.map((value) => localizeEncryption(value, t)).join(" / ");
-}
-
-function previewMessage(
-  code: PreviewDescriptor["messageCode"],
-  t: Translate,
-): string {
-  if (!code) return "";
-  return {
-    SELECT_FILE: t("previewSelectFile"),
-    UNSUPPORTED_TYPE: t("previewUnsupported"),
-    BINARY_DATA: t("previewBinary"),
-    TRUNCATED: t("previewTruncated"),
-  }[code];
-}
-
-function localizeError(error: AppErrorDto, t: Translate): AppErrorDto {
-  const message =
-    {
-      INTERNAL_ERROR: t("errorInternal"),
-      INVALID_ARGUMENT: t("errorInvalidArgument"),
-      PASSWORD_REQUIRED: t("errorPasswordRequired"),
-      WRONG_PASSWORD: t("errorWrongPassword"),
-      PATH_NOT_FOUND: t("errorPathNotFound"),
-      PERMISSION_DENIED: t("errorPermissionDenied"),
-      IO_ERROR: t("errorIo"),
-      ARCHIVE_CORRUPT: t("errorArchiveCorrupt"),
-    }[error.code] ?? error.message;
-  const userAction =
-    {
-      PASSWORD_REQUIRED: t("actionEnterPassword"),
-      WRONG_PASSWORD: t("actionCheckPassword"),
-      PATH_NOT_FOUND: t("actionCheckLocation"),
-    }[error.code] ?? error.userAction;
-  return { ...error, message, userAction };
-}
-
-function FolderGlyph() {
-  return (
-    <svg
-      aria-hidden="true"
-      className={styles.folderGlyph}
-      width="16"
-      height="16"
-      viewBox="0 0 15 15"
-      fill="none"
-    >
-      <path
-        d="M1.5 3.25h4l1.1 1.25h6.9v7.25H1.5v-8.5Z"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
