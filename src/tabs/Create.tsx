@@ -4,10 +4,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readAllIfDir } from "../utils/fs";
-import { CubeIcon, Cross1Icon, FileIcon, GearIcon } from "@radix-ui/react-icons";
+import {
+  CubeIcon,
+  Cross1Icon,
+  FileIcon,
+  GearIcon,
+} from "@radix-ui/react-icons";
 import ProcessingIcon from "../components/ProcessingIcon";
 import styles from "./Create.module.css";
 import Uncontrolable from "../components/Uncontrolable";
+import { useI18n } from "../features/i18n";
 import {
   Button,
   Flex,
@@ -30,6 +36,7 @@ const ENCRYPTION = ["none", "aes", "camellia"] as const;
 type Encryption = (typeof ENCRYPTION)[number];
 
 export default function Create() {
+  const { t } = useI18n();
   const [appWindow, setAppWindow] = useState<WebviewWindow>();
   const [openSettings, setOpenSettings] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
@@ -42,7 +49,7 @@ export default function Create() {
   const [draggingOver, setDraggingOver] = useState(false);
 
   const addFiles = async (paths: string[]) => {
-    let files: string[] = [];
+    const files: string[] = [];
     for (const path of paths) {
       files.push(...(await readAllIfDir(path)));
     }
@@ -58,12 +65,12 @@ export default function Create() {
 
   const create = async () => {
     if (encryption !== "none" && password.length === 0) {
-      window.alert("password is needed");
+      window.alert(t("passwordNeeded"));
       return;
     }
 
     const filePath = await save({
-      title: "Save Archive",
+      title: t("saveArchive"),
       defaultPath: "archive.pna",
       filters: [{ name: "PNA Archive", extensions: ["pna"] }],
     });
@@ -140,7 +147,9 @@ export default function Create() {
 
   return (
     <div className={styles.root}>
-      <div className={`${styles.fileArea} ${draggingOver ? styles.dragOver : ""}`}>
+      <div
+        className={`${styles.fileArea} ${draggingOver ? styles.dragOver : ""}`}
+      >
         {files.length === 0 ? (
           <div className={styles.fileAreaEmpty} onClick={openFilePicker}>
             <CubeIcon
@@ -152,15 +161,13 @@ export default function Create() {
                 transition: "transform 0.2s ease, color 0.2s ease",
               }}
             />
-            <span className={styles.fileAreaHint}>Drop files here</span>
-            <span className={styles.fileAreaSubHint}>or click to browse</span>
+            <span className={styles.fileAreaHint}>{t("dropFiles")}</span>
+            <span className={styles.fileAreaSubHint}>{t("browseFiles")}</span>
           </div>
         ) : (
           <>
             <div className={styles.dropPrompt} onClick={openFilePicker}>
-              <span className={styles.dropPromptText}>
-                Drop more files or click to add
-              </span>
+              <span className={styles.dropPromptText}>{t("addMoreFiles")}</span>
             </div>
             <div className={styles.fileList}>
               {files.map((it) => (
@@ -213,11 +220,11 @@ export default function Create() {
             </IconButton>
           </Dialog.Trigger>
           <Dialog.Content maxWidth="380px">
-            <Dialog.Title>Archive Options</Dialog.Title>
+            <Dialog.Title>{t("archiveOptions")}</Dialog.Title>
             <Flex direction="column" gap="3" mt="2">
               <Flex direction="column" gap="1">
                 <Text size="2" weight="medium">
-                  Compression
+                  {t("compression")}
                 </Text>
                 <Select.Root
                   defaultValue={compression}
@@ -227,7 +234,7 @@ export default function Create() {
                   <Select.Content>
                     {COMPRESSION.map((it) => (
                       <Select.Item key={it} value={it}>
-                        {it}
+                        {it === "none" ? t("none") : it}
                       </Select.Item>
                     ))}
                   </Select.Content>
@@ -235,7 +242,7 @@ export default function Create() {
               </Flex>
               <Flex direction="column" gap="1">
                 <Text size="2" weight="medium">
-                  Encryption
+                  {t("encryption")}
                 </Text>
                 <Select.Root
                   defaultValue={encryption}
@@ -245,7 +252,7 @@ export default function Create() {
                   <Select.Content>
                     {ENCRYPTION.map((it) => (
                       <Select.Item key={it} value={it}>
-                        {it}
+                        {it === "none" ? t("none") : it}
                       </Select.Item>
                     ))}
                   </Select.Content>
@@ -253,7 +260,7 @@ export default function Create() {
               </Flex>
               <Flex direction="column" gap="1">
                 <Text size="2" weight="medium">
-                  Password
+                  {t("password")}
                 </Text>
                 <TextField.Root
                   type="password"
@@ -271,13 +278,15 @@ export default function Create() {
                       setSolidMode(state);
                     }}
                   />
-                  Solid mode
+                  {t("solidMode")}
                 </Flex>
               </Text>
             </Flex>
             <Flex mt="4" justify="end">
               <Dialog.Close>
-                <Button onClick={() => setOpenSettings(false)}>Done</Button>
+                <Button onClick={() => setOpenSettings(false)}>
+                  {t("done")}
+                </Button>
               </Dialog.Close>
             </Flex>
           </Dialog.Content>
@@ -290,7 +299,7 @@ export default function Create() {
           <Spinner loading={processing}>
             <CubeIcon />
           </Spinner>
-          Create Archive
+          {t("createArchive")}
         </Button>
       </div>
 

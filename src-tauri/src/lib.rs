@@ -1,5 +1,6 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod reader;
 mod utils;
 
 use std::{
@@ -11,7 +12,7 @@ use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{MenuBuilder, MenuItem, SubmenuBuilder},
-    Emitter, Window,
+    Emitter, Manager, Window,
 };
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
@@ -290,6 +291,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
+            let app_data_dir = app.path().app_data_dir()?;
+            app.manage(reader::ReaderState::new(app_data_dir.join("recent.json")));
+
             // --- Window Menu Bar (matching v1 Menu::os_default layout) ---
             let update_check = MenuItem::with_id(
                 app,
@@ -438,7 +442,19 @@ pub fn run() {
                 .build(app)?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create, extract,])
+        .invoke_handler(tauri::generate_handler![
+            create,
+            extract,
+            reader::app_bootstrap,
+            reader::recent_remove,
+            reader::archive_open,
+            reader::archive_close,
+            reader::archive_summary,
+            reader::archive_children,
+            reader::archive_search,
+            reader::archive_entry_details,
+            reader::archive_preview,
+        ])
         .run(context)
         .expect("error while running tauri application");
 }

@@ -15,7 +15,9 @@
   border-radius: 12px;
   gap: 16px;
   cursor: default;
-  transition: border-color 0.3s ease, background-color 0.3s ease;
+  transition:
+    border-color 0.3s ease,
+    background-color 0.3s ease;
 }
 
 .dropZone:hover {
@@ -25,7 +27,9 @@
 
 .icon {
   opacity: 0.8;
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
 }
 
 .dropZone:hover .icon {

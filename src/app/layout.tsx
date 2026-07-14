@@ -3,8 +3,9 @@ import { Theme } from "@radix-ui/themes";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PNA",
-  description: "PNA GUI",
+  title: "Portable Network Archive",
+  description:
+    "A desktop app for creating and browsing Portable Network Archives",
 };
 
 export default function RootLayout({
@@ -15,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <Theme appearance="dark" accentColor="iris" grayColor="slate">
+        <Theme appearance="light" accentColor="blue" grayColor="slate">
           {children}
         </Theme>
       </body>
