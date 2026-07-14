@@ -1,11 +1,18 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getMatches } from "@tauri-apps/plugin-cli";
 import Uncontrolable from "../components/Uncontrolable";
-import { Text, Dialog, Button, TextField, Spinner, Flex } from "@radix-ui/themes";
+import {
+  Text,
+  Dialog,
+  Button,
+  TextField,
+  Spinner,
+  Flex,
+} from "@radix-ui/themes";
 import Image from "next/image";
 import styles from "./Extract.module.css";
 
@@ -20,28 +27,36 @@ export default function Extract() {
   const [openPasswordDialog, setOpenPasswordDialog] = useState(false);
   const [outDir, setOutDir] = useState<string>();
 
-  const extract = (path: string, password?: string) => {
-    setProcessing(true);
-    invoke("extract", { path, password, event: EVENT_ON_START_PROCESS_ENTRY, outDir })
-      .then(() => {
-        setArchivePath(undefined);
-        setPassword(undefined);
-        setOutDir(undefined);
-        setProcessing(false);
+  const extract = useCallback(
+    (path: string, password?: string) => {
+      setProcessing(true);
+      invoke("extract", {
+        path,
+        password,
+        event: EVENT_ON_START_PROCESS_ENTRY,
+        outDir,
       })
-      .catch((err) => {
-        const message = err.toString() as string;
-        if (message.includes("encrypted")) {
-          setOpenPasswordDialog(true);
-          return;
-        }
-        setArchivePath(undefined);
-        setPassword(undefined);
-        setOutDir(undefined);
-        setProcessing(false);
-        window.alert(err);
-      });
-  };
+        .then(() => {
+          setArchivePath(undefined);
+          setPassword(undefined);
+          setOutDir(undefined);
+          setProcessing(false);
+        })
+        .catch((err) => {
+          const message = err.toString() as string;
+          if (message.includes("encrypted")) {
+            setOpenPasswordDialog(true);
+            return;
+          }
+          setArchivePath(undefined);
+          setPassword(undefined);
+          setOutDir(undefined);
+          setProcessing(false);
+          window.alert(err);
+        });
+    },
+    [outDir],
+  );
 
   const selectOutputAndSetPath = async (path: string) => {
     const dir = await open({
@@ -116,7 +131,7 @@ export default function Extract() {
   useEffect(() => {
     if (archivePath === undefined) return;
     extract(archivePath, password);
-  }, [archivePath, password]);
+  }, [archivePath, extract, password]);
 
   return (
     <div className={styles.root}>

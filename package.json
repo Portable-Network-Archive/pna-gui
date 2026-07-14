@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "tauri": "tauri",
     "format": "prettier --write './src/**/*.{js,jsx,ts,tsx,json,css}'",
     "format:check": "prettier --check './src/**/*.{js,jsx,ts,tsx,json,css}'",
@@ -32,10 +32,9 @@
     "@types/node": "^22.15.19",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.2",
-    "eslint": "^10",
+    "eslint": "^9.39.5",
     "eslint-config-next": "16.2.9",
     "prettier": "^3.8.3",
-    "typescript": "^6.0.3"
+    "typescript": "^5.9.3"
   }
 }

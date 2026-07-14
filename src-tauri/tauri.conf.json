@@ -62,12 +62,14 @@
     },
     "windows": [
       {
-        "transparent": true,
+        "transparent": false,
         "fullscreen": false,
         "resizable": true,
-        "title": "portable-network-archive",
-        "width": 950,
-        "height": 450,
+        "title": "Portable Network Archive",
+        "width": 1280,
+        "height": 760,
+        "minWidth": 820,
+        "minHeight": 600,
         "useHttpsScheme": true
       }
     ]
