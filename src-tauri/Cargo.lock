@@ -3008,7 +3008,7 @@ dependencies = [
 
 [[package]]
 name = "pna-gui"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "libpna",
  "open",
