@@ -278,6 +278,12 @@ where
                     "archive links are not extracted",
                 ));
             }
+            libpna::DataKind::Reserved(_) | libpna::DataKind::Private(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unsupported archive entry kind",
+                ));
+            }
         }
     }
     on_change_archive(Event::Finish, &out_dir);

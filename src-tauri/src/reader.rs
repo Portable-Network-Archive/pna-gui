@@ -443,7 +443,10 @@ fn build_index(
         let meta = entry.metadata();
         let raw_size = meta.raw_file_size().and_then(u128_to_u64);
         original_bytes = original_bytes.saturating_add(raw_size.unwrap_or(0));
-        let permission = meta.permission();
+        let owner_uid = meta.owner_uid();
+        let owner_gid = meta.owner_gid();
+        let owner_user_name = meta.owner_user_name();
+        let owner_group_name = meta.owner_group_name();
         let indexed = IndexedEntry {
             dto: ArchiveEntryDto {
                 id: String::new(),
@@ -460,21 +463,25 @@ fn build_index(
             },
             created_at: meta.created().map(|value| value.whole_seconds()),
             accessed_at: meta.accessed().map(|value| value.whole_seconds()),
-            permission: permission.map(|value| format!("{:04o}", value.permissions())),
-            owner: permission.map(|value| {
-                if value.uname().is_empty() {
-                    value.uid().to_string()
-                } else {
-                    format!("{} ({})", value.uname(), value.uid())
+            permission: meta
+                .permission_mode()
+                .map(|value| format!("{:04o}", value.get())),
+            owner: match (owner_user_name, owner_uid) {
+                (Some(name), Some(id)) if !name.as_str().is_empty() => {
+                    Some(format!("{} ({})", name.as_str(), id.get()))
                 }
-            }),
-            group: permission.map(|value| {
-                if value.gname().is_empty() {
-                    value.gid().to_string()
-                } else {
-                    format!("{} ({})", value.gname(), value.gid())
+                (Some(name), _) if !name.as_str().is_empty() => Some(name.as_str().to_string()),
+                (_, Some(id)) => Some(id.get().to_string()),
+                _ => None,
+            },
+            group: match (owner_group_name, owner_gid) {
+                (Some(name), Some(id)) if !name.as_str().is_empty() => {
+                    Some(format!("{} ({})", name.as_str(), id.get()))
                 }
-            }),
+                (Some(name), _) if !name.as_str().is_empty() => Some(name.as_str().to_string()),
+                (_, Some(id)) => Some(id.get().to_string()),
+                _ => None,
+            },
             xattr_count: entry.xattrs().len(),
         };
         insert_parent_directories(&mut raw_entries, &path);
@@ -787,6 +794,7 @@ fn compression_name(value: Compression) -> &'static str {
         Compression::Deflate => "Deflate",
         Compression::ZStandard => "Zstandard",
         Compression::XZ => "XZ",
+        Compression::Reserved(_) | Compression::Private(_) => "Unknown",
     }
 }
 
@@ -795,6 +803,7 @@ fn encryption_name(value: Encryption) -> &'static str {
         Encryption::No => "None",
         Encryption::Aes => "AES",
         Encryption::Camellia => "Camellia",
+        Encryption::Reserved(_) | Encryption::Private(_) => "Unknown",
     }
 }
 
@@ -804,6 +813,7 @@ fn kind_name(value: DataKind) -> &'static str {
         DataKind::Directory => "directory",
         DataKind::SymbolicLink => "symlink",
         DataKind::HardLink => "hardlink",
+        DataKind::Reserved(_) | DataKind::Private(_) => "unknown",
     }
 }
 
@@ -1253,6 +1263,12 @@ mod tests {
         assert_eq!(encryption_name(Encryption::No), "None");
         assert_eq!(encryption_name(Encryption::Aes), "AES");
         assert_eq!(encryption_name(Encryption::Camellia), "Camellia");
+        assert_eq!(kind_name(DataKind::Reserved(4)), "unknown");
+        assert_eq!(kind_name(DataKind::Private(128)), "unknown");
+        assert_eq!(compression_name(Compression::Reserved(3)), "Unknown");
+        assert_eq!(compression_name(Compression::Private(128)), "Unknown");
+        assert_eq!(encryption_name(Encryption::Reserved(3)), "Unknown");
+        assert_eq!(encryption_name(Encryption::Private(128)), "Unknown");
         assert!(is_text_preview("README.MD"));
         assert!(!is_text_preview("photo.png"));
     }
