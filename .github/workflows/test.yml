@@ -60,7 +60,7 @@ jobs:
       - name: run Tauri E2E tests
         if: matrix.platform == 'ubuntu-latest'
         run: xvfb-run -a npm run test:e2e
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         with:
           tauriScript: 'npm run tauri'
           args: "--no-bundle ${{ matrix.args }}"
