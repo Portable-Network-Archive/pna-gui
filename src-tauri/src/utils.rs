@@ -9,7 +9,10 @@ pub(crate) fn is_encrypted<P: AsRef<Path>>(path: P) -> io::Result<bool> {
         let entry = entry?;
         match entry.header().encryption() {
             Encryption::No => (),
-            Encryption::Aes | Encryption::Camellia => return Ok(true),
+            Encryption::Aes
+            | Encryption::Camellia
+            | Encryption::Reserved(_)
+            | Encryption::Private(_) => return Ok(true),
         }
     }
     Ok(false)
