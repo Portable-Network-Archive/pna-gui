@@ -17,6 +17,7 @@ use crate::operations::{
     AppendRequest, ConcatRequest, CreateRequest, DeleteEntriesRequest, ExtractRequest,
     MigrateRequest, RenameEntryRequest, SortRequest, SplitRequest, StripMetadataRequest,
 };
+use crate::verification::{VerificationReport, VerifyRequest};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +44,7 @@ pub enum JobKind {
     Sort,
     Strip,
     Migrate,
+    Verify,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -60,6 +62,8 @@ pub struct JobSnapshot {
     pub error_code: Option<String>,
     #[serde(default)]
     pub warnings: Vec<String>,
+    #[serde(default)]
+    pub verification_report: Option<VerificationReport>,
 }
 
 #[derive(Clone)]
@@ -74,6 +78,7 @@ pub enum JobRequest {
     Sort(SortRequest),
     Strip(StripMetadataRequest),
     Migrate(MigrateRequest),
+    Verify(VerifyRequest),
 }
 
 impl JobRequest {
@@ -89,6 +94,7 @@ impl JobRequest {
             Self::Sort(_) => JobKind::Sort,
             Self::Strip(_) => JobKind::Strip,
             Self::Migrate(_) => JobKind::Migrate,
+            Self::Verify(_) => JobKind::Verify,
         }
     }
 
@@ -112,8 +118,14 @@ impl JobRequest {
             Self::Sort(request) => Some(request.output_path.clone()),
             Self::Strip(request) => Some(request.output_path.clone()),
             Self::Migrate(request) => Some(request.output_path.clone()),
+            Self::Verify(_) => None,
         }
     }
+}
+
+enum JobExecutionOutcome {
+    Operation(crate::operations::OperationOutcome),
+    Verification(VerificationReport),
 }
 
 struct JobRecord {
@@ -171,6 +183,7 @@ impl JobManager {
             error: None,
             error_code: None,
             warnings: Vec::new(),
+            verification_report: None,
         };
         let cancelled = Arc::new(AtomicBool::new(false));
         self.inner.records.lock().unwrap().insert(
@@ -277,6 +290,7 @@ impl JobManager {
             record.snapshot.total_units = None;
             record.snapshot.error = None;
             record.snapshot.warnings.clear();
+            record.snapshot.verification_report = None;
             (record.request.clone(), record.snapshot.clone())
         };
         observer(snapshot.clone());
@@ -361,6 +375,7 @@ impl JobManager {
                     | JobRequest::Sort(_)
                     | JobRequest::Strip(_)
                     | JobRequest::Migrate(_) => "reading".into(),
+                    JobRequest::Verify(_) => "verifying".into(),
                 };
             }
         });
@@ -380,6 +395,7 @@ impl JobManager {
                         | JobKind::Sort
                         | JobKind::Strip
                         | JobKind::Migrate => "writing".into(),
+                        JobKind::Verify => "verifying".into(),
                     };
                     snapshot.completed_units = completed;
                     snapshot.total_units = Some(total);
@@ -392,55 +408,71 @@ impl JobManager {
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
             JobRequest::Extract(request) => crate::operations::extract_archive(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
             JobRequest::Append(request) => crate::operations::append_archive(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
             JobRequest::Delete(request) => crate::operations::delete_archive_entries(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
             JobRequest::Rename(request) => crate::operations::rename_archive_entry(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
             JobRequest::Split(request) => crate::operations::split_archive(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
             JobRequest::Concat(request) => crate::operations::concat_archives(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
             JobRequest::Sort(request) => crate::operations::sort_archive(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
             JobRequest::Strip(request) => crate::operations::strip_archive_metadata(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
             JobRequest::Migrate(request) => crate::operations::migrate_archive(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
-            ),
+            )
+            .map(JobExecutionOutcome::Operation),
+            JobRequest::Verify(request) => crate::verification::verify_archive(
+                request,
+                || cancelled.load(Ordering::Acquire),
+                progress,
+            )
+            .map(JobExecutionOutcome::Verification),
         };
         self.update(&id, &observer, |snapshot| match result {
-            Ok(outcome) => {
+            Ok(JobExecutionOutcome::Operation(outcome)) => {
                 snapshot.status = JobStatus::Succeeded;
                 snapshot.phase = "completed".into();
                 snapshot.completed_units = outcome.completed_items;
@@ -449,6 +481,17 @@ impl JobManager {
                 snapshot.error = None;
                 snapshot.error_code = None;
                 snapshot.warnings = outcome.warnings;
+            }
+            Ok(JobExecutionOutcome::Verification(report)) => {
+                snapshot.status = JobStatus::Succeeded;
+                snapshot.phase = "completed".into();
+                snapshot.completed_units = report.entries_checked;
+                snapshot.total_units = Some(report.entries_checked);
+                snapshot.output_path = None;
+                snapshot.error = None;
+                snapshot.error_code = None;
+                snapshot.warnings.clear();
+                snapshot.verification_report = Some(report);
             }
             Err(error) if cancelled.load(Ordering::Acquire) => {
                 snapshot.status = JobStatus::Cancelled;
@@ -563,6 +606,78 @@ mod tests {
             assert!(Instant::now() < deadline, "job did not finish");
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn verification_job_retains_its_structured_report() {
+        // BE-VERIFY-JOB-REPORT
+        use std::io::Write;
+
+        use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
+
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("verify.pna");
+        let file = fs::File::create(&archive_path).unwrap();
+        let mut archive = Archive::write_header(file).unwrap();
+        let mut entry =
+            EntryBuilder::new_file(EntryName::from("readme.txt"), WriteOptions::store()).unwrap();
+        entry.write_all(b"job report").unwrap();
+        archive.add_entry(entry.build().unwrap()).unwrap();
+        archive.finalize().unwrap();
+
+        let manager = JobManager::default();
+        let snapshot = manager
+            .start(
+                JobRequest::Verify(crate::verification::VerifyRequest {
+                    archive_path,
+                    password: None,
+                    mode: crate::verification::VerificationMode::Complete,
+                }),
+                Arc::new(|_| {}),
+            )
+            .unwrap();
+        let completed = wait_for_terminal(&manager, &snapshot.id);
+
+        assert_eq!(completed.kind, JobKind::Verify);
+        assert_eq!(completed.status, JobStatus::Succeeded);
+        let report = completed.verification_report.unwrap();
+        assert_eq!(
+            report.conclusion,
+            crate::verification::VerificationConclusion::Passed
+        );
+        assert_eq!(report.files_checked, 1);
+        assert!(completed.output_path.is_none());
+    }
+
+    #[test]
+    fn retrying_a_failed_verification_starts_clean_and_produces_a_fresh_report() {
+        // BE-VERIFY-RETRY-REPORT
+        use libpna::Archive;
+
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("missing.pna");
+        let manager = JobManager::default();
+        let queued = manager
+            .start(
+                JobRequest::Verify(crate::verification::VerifyRequest {
+                    archive_path: archive_path.clone(),
+                    password: None,
+                    mode: crate::verification::VerificationMode::Quick,
+                }),
+                Arc::new(|_| {}),
+            )
+            .unwrap();
+        let failed = wait_for_terminal(&manager, &queued.id);
+        assert_eq!(failed.status, JobStatus::Failed);
+        assert!(failed.verification_report.is_none());
+
+        let file = fs::File::create(&archive_path).unwrap();
+        Archive::write_header(file).unwrap().finalize().unwrap();
+        let retried = manager.retry(&queued.id, Arc::new(|_| {})).unwrap();
+        assert!(retried.verification_report.is_none());
+        let completed = wait_for_terminal(&manager, &queued.id);
+        assert_eq!(completed.status, JobStatus::Succeeded);
+        assert!(completed.verification_report.is_some());
     }
 
     #[test]

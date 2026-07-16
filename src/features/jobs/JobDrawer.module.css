@@ -81,6 +81,14 @@
   color: var(--app-error);
 }
 
+.job[data-verification="issues_found"] .statusIcon {
+  color: var(--app-error);
+}
+
+.job[data-verification="incomplete"] .statusIcon {
+  color: #8a5a00;
+}
+
 .jobInfo {
   display: grid;
   min-width: 0;

@@ -9,6 +9,46 @@ export type JobStatus =
   | "failed"
   | "interrupted";
 
+export type VerificationMode = "quick" | "complete";
+export type VerificationConclusion = "passed" | "issues_found" | "incomplete";
+export type VerificationCheckStatus = "passed" | "failed" | "not_checked";
+export type VerificationCheckCode =
+  | "archive_header"
+  | "chunk_integrity"
+  | "entry_structure"
+  | "file_contents"
+  | "directory_entry"
+  | "solid_contents"
+  | "link_entry"
+  | "unsupported_entry"
+  | "entry_path";
+
+export interface VerificationCheck {
+  code: VerificationCheckCode;
+  status: VerificationCheckStatus;
+  entryPath?: string | null;
+  detail?: string | null;
+}
+
+export interface VerificationReport {
+  archivePath: string;
+  sourceSize: number;
+  sourceModifiedAt?: number | null;
+  completedAt: number;
+  mode: VerificationMode;
+  conclusion: VerificationConclusion;
+  /** null when verification ended before the entry pass could determine it. */
+  encrypted: boolean | null;
+  solid: boolean | null;
+  entriesChecked: number;
+  filesChecked: number;
+  bytesChecked: number;
+  failedChecks: number;
+  notCheckedChecks: number;
+  checksOmitted: number;
+  checks: VerificationCheck[];
+}
+
 export interface JobSnapshot {
   id: string;
   kind:
@@ -21,7 +61,8 @@ export interface JobSnapshot {
     | "concat"
     | "sort"
     | "strip"
-    | "migrate";
+    | "migrate"
+    | "verify";
   status: JobStatus;
   phase: string;
   currentItem?: string | null;
@@ -31,6 +72,7 @@ export interface JobSnapshot {
   error?: string | null;
   errorCode?: string | null;
   warnings?: string[];
+  verificationReport?: VerificationReport | null;
 }
 
 export interface CreateJobRequest {
@@ -108,6 +150,20 @@ export const jobApi = {
     outputPath: string;
     password: string | null;
   }) => invoke<JobSnapshot>("job_start_migrate", { request }),
+  startVerify: (request: {
+    archivePath: string;
+    password: string | null;
+    mode: VerificationMode;
+  }) => invoke<JobSnapshot>("job_start_verify", { request }),
+  /** null when freshness could not be determined (no modification stamp). */
+  verificationSourceMatches: (report: VerificationReport) =>
+    invoke<boolean | null>("verification_source_matches", {
+      request: {
+        archivePath: report.archivePath,
+        sourceSize: report.sourceSize,
+        sourceModifiedAt: report.sourceModifiedAt ?? null,
+      },
+    }),
   list: () => invoke<JobSnapshot[]>("job_list"),
   cancel: (jobId: string) => invoke<JobSnapshot>("job_cancel", { jobId }),
   retry: (jobId: string) => invoke<JobSnapshot>("job_retry", { jobId }),

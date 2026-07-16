@@ -6,10 +6,16 @@ import {
   CrossCircledIcon,
   Cross2Icon,
   ExclamationTriangleIcon,
+  InfoCircledIcon,
   ReloadIcon,
 } from "@radix-ui/react-icons";
 import { Button, Dialog, Flex } from "@radix-ui/themes";
-import { jobApi, type JobSnapshot, type JobStatus } from "./api";
+import {
+  jobApi,
+  type JobSnapshot,
+  type JobStatus,
+  type VerificationReport,
+} from "./api";
 import { TranslationKey, useI18n } from "../i18n";
 import styles from "./JobDrawer.module.css";
 
@@ -33,9 +39,11 @@ function jobSequence(id: string): number {
 export default function JobDrawer({
   onOpenArchive,
   onCreatedArchive,
+  onViewVerification,
 }: {
   onOpenArchive?: (path: string) => void | Promise<void>;
   onCreatedArchive?: () => void | Promise<void>;
+  onViewVerification?: (report: VerificationReport) => void;
 }) {
   const { t } = useI18n();
   const [jobs, setJobs] = useState<JobSnapshot[]>([]);
@@ -155,6 +163,10 @@ export default function JobDrawer({
       reportActionError(caught);
     }
   };
+  const viewVerification = (report: VerificationReport) => {
+    setOpen(false);
+    onViewVerification?.(report);
+  };
   const clearFinished = async () => {
     setActionError(undefined);
     try {
@@ -208,6 +220,9 @@ export default function JobDrawer({
             onCancel={cancel}
             onRetry={retry}
             onOpenArchive={onOpenArchive ? openArchive : undefined}
+            onViewVerification={
+              onViewVerification ? viewVerification : undefined
+            }
           />
         )}
         {syncError && !open && (
@@ -256,6 +271,9 @@ export default function JobDrawer({
               onCancel={cancel}
               onRetry={retry}
               onOpenArchive={onOpenArchive ? openArchive : undefined}
+              onViewVerification={
+                onViewVerification ? viewVerification : undefined
+              }
             />
           ))}
         </div>
@@ -294,6 +312,7 @@ function JobRow({
   onCancel,
   onRetry,
   onOpenArchive,
+  onViewVerification,
 }: {
   job: JobSnapshot;
   compact?: boolean;
@@ -302,26 +321,44 @@ function JobRow({
   onCancel: (jobId: string) => Promise<void>;
   onRetry: (jobId: string) => Promise<void>;
   onOpenArchive?: (path: string) => void | Promise<void>;
+  onViewVerification?: (report: VerificationReport) => void;
 }) {
   const { t } = useI18n();
   const canCancel = job.status === "queued" || job.status === "running";
   const canRetry = ["failed", "cancelled", "interrupted"].includes(job.status);
   const canDismiss = !ACTIVE.has(job.status);
-  const canOpenArchiveOutput = !["extract", "split"].includes(job.kind);
+  const canOpenArchiveOutput = !["extract", "split", "verify"].includes(
+    job.kind,
+  );
   const presentedError = job.error ? presentJobError(job, t) : undefined;
   const progress = job.totalUnits
     ? `${job.completedUnits} ${t("of")} ${job.totalUnits}`
     : `${job.completedUnits}`;
-  const status = t(STATUS_KEYS[job.status]);
-  const detail = ACTIVE.has(job.status)
-    ? (job.currentItem ?? job.outputPath ?? status)
-    : (job.outputPath ?? job.currentItem ?? status);
+  const status = job.verificationReport
+    ? job.verificationReport.conclusion === "passed" &&
+      job.verificationReport.mode === "quick"
+      ? t("quickVerificationCompleted")
+      : {
+          passed: t("verificationPassed"),
+          issues_found: t("verificationIssuesFound"),
+          incomplete: t("verificationIncomplete"),
+        }[job.verificationReport.conclusion]
+    : t(STATUS_KEYS[job.status]);
+  const detail =
+    job.verificationReport?.archivePath ??
+    (ACTIVE.has(job.status)
+      ? (job.currentItem ?? job.outputPath ?? status)
+      : (job.outputPath ?? job.currentItem ?? status));
   const outputIdentity =
     job.outputPath && detail === job.outputPath
       ? splitResultPath(job.outputPath)
       : undefined;
   const icon =
-    job.status === "succeeded" ? (
+    job.verificationReport?.conclusion === "issues_found" ? (
+      <ExclamationTriangleIcon />
+    ) : job.verificationReport?.conclusion === "incomplete" ? (
+      <InfoCircledIcon />
+    ) : job.status === "succeeded" ? (
       <CheckCircledIcon />
     ) : job.status === "failed" || job.status === "interrupted" ? (
       <ExclamationTriangleIcon />
@@ -332,7 +369,11 @@ function JobRow({
     );
 
   return (
-    <article className={styles.job} data-status={job.status}>
+    <article
+      className={styles.job}
+      data-status={job.status}
+      data-verification={job.verificationReport?.conclusion}
+    >
       <span className={styles.statusIcon} aria-hidden="true">
         {icon}
       </span>
@@ -351,10 +392,23 @@ function JobRow({
                 sort: t("sortJob"),
                 strip: t("stripJob"),
                 migrate: t("migrateJob"),
+                verify: t("verificationJob"),
               }[job.kind]
             }
           </strong>
-          <span>{status}</span>
+          {job.verificationReport && (
+            <small>
+              {job.verificationReport.mode === "quick"
+                ? t("quickVerification")
+                : t("completeVerification")}
+            </small>
+          )}
+          <span
+            aria-live={ACTIVE.has(job.status) ? undefined : "polite"}
+            aria-atomic={ACTIVE.has(job.status) ? undefined : "true"}
+          >
+            {status}
+          </span>
         </div>
         {outputIdentity ? (
           <span
@@ -448,6 +502,18 @@ function JobRow({
               {job.kind === "create"
                 ? t("openCreatedArchive")
                 : t("openJobOutput")}
+            </Button>
+          )}
+        {job.status === "succeeded" &&
+          job.verificationReport &&
+          onViewVerification && (
+            <Button
+              type="button"
+              size="1"
+              variant="soft"
+              onClick={() => onViewVerification(job.verificationReport!)}
+            >
+              {t("viewVerificationResults")}
             </Button>
           )}
         {canDismiss && (
