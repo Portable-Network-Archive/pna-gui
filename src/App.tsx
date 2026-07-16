@@ -7,6 +7,7 @@ import {
   ArrowRightIcon,
   ChevronRightIcon,
   ClockIcon,
+  CheckCircledIcon,
   Cross2Icon,
   FileIcon,
   HomeIcon,
@@ -69,8 +70,14 @@ import type {
   SortSpec,
 } from "./features/archive/types";
 import styles from "./App.module.css";
-import { jobApi, type JobSnapshot } from "./features/jobs/api";
+import {
+  jobApi,
+  type JobSnapshot,
+  type VerificationReport,
+} from "./features/jobs/api";
 import JobDrawer from "./features/jobs/JobDrawer";
+import VerificationDialog from "./features/verification/VerificationDialog";
+import VerificationResultsDialog from "./features/verification/VerificationResultsDialog";
 
 registerE2eBridge();
 
@@ -103,6 +110,8 @@ function AppContent() {
   const [passwordPath, setPasswordPath] = useState<string>();
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string>();
+  const [verificationReport, setVerificationReport] =
+    useState<VerificationReport>();
   const openingRef = useRef(false);
   const cliSourceHandledRef = useRef(false);
   const activeArchiveRef = useRef<ActiveArchiveSession | undefined>(undefined);
@@ -343,6 +352,7 @@ function AppContent() {
           onHome={goHome}
           onOpen={chooseArchive}
           onError={setError}
+          sessionPassword={activeArchiveRef.current?.password}
         />
       )}
       {view === "create" && (
@@ -444,7 +454,17 @@ function AppContent() {
       <JobDrawer
         onOpenArchive={openArchivePath}
         onCreatedArchive={refreshBootstrap}
+        onViewVerification={setVerificationReport}
       />
+      {verificationReport && (
+        <VerificationResultsDialog
+          open
+          report={verificationReport}
+          onOpenChange={(open) => {
+            if (!open) setVerificationReport(undefined);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -642,6 +662,7 @@ interface BrowserViewProps {
   onHome: () => void;
   onOpen: () => void;
   onError: (error: AppErrorDto) => void;
+  sessionPassword?: string;
 }
 
 function BrowserView({
@@ -651,6 +672,7 @@ function BrowserView({
   onHome,
   onOpen,
   onError,
+  sessionPassword,
 }: BrowserViewProps) {
   const { locale, t } = useI18n();
   const rootLocation: FolderLocation = { name: t("root"), path: "" };
@@ -690,6 +712,7 @@ function BrowserView({
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<AppErrorDto>();
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [verificationOpen, setVerificationOpen] = useState(false);
 
   const currentTrail = history[historyIndex];
   const current = currentTrail[currentTrail.length - 1];
@@ -874,6 +897,15 @@ function BrowserView({
         >
           <DownloadIcon aria-hidden="true" />
           <span className={styles.toolbarLabel}>{t("extract")}</span>
+        </button>
+        <button
+          className={styles.toolbarButton}
+          aria-label={t("verifyArchive")}
+          title={t("verifyArchive")}
+          onClick={() => setVerificationOpen(true)}
+        >
+          <CheckCircledIcon aria-hidden="true" />
+          <span className={styles.toolbarLabel}>{t("verifyArchive")}</span>
         </button>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
@@ -1187,6 +1219,16 @@ function BrowserView({
         open={appendOpen}
         archive={archive}
         onOpenChange={setAppendOpen}
+      />
+      <VerificationDialog
+        open={verificationOpen}
+        archivePath={archive.summary.path}
+        archiveName={archive.summary.displayName}
+        encrypted={archive.summary.encryptionMethods.some(
+          (method) => method.toLowerCase() !== "none",
+        )}
+        sessionPassword={sessionPassword}
+        onOpenChange={setVerificationOpen}
       />
       <Dialog.Root
         open={renameOpen}

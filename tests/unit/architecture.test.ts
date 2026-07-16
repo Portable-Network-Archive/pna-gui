@@ -58,6 +58,18 @@ describe("shipped feature boundaries", () => {
     }
   });
 
+  it("registers verification as a production job command with no output path", () => {
+    // ARCH-VERIFY-IPC-REGISTERED
+    const backend = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
+    const jobs = readFileSync(resolve(root, "src-tauri/src/jobs.rs"), "utf8");
+    expect(backend).toMatch(/generate_handler!\[[\s\S]*\bjob_start_verify,?/);
+    expect(backend).toMatch(
+      /generate_handler!\[[\s\S]*\bverification::verification_source_matches,?/,
+    );
+    expect(jobs).toContain("Verify(VerifyRequest)");
+    expect(jobs).toContain("Self::Verify(_) => None");
+  });
+
   it("preserves the five-platform CI architecture", () => {
     // ARCH-CI-FIVE-PLATFORMS, ARCH-CI-RUST-FRONTEND-ASSET
     const workflow = readFileSync(

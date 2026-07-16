@@ -4,6 +4,7 @@ mod jobs;
 mod operations;
 mod reader;
 mod utils;
+mod verification;
 
 use std::{
     fs::{self, OpenOptions},
@@ -109,6 +110,7 @@ start_job_command!(
     Strip
 );
 start_job_command!(job_start_migrate, operations::MigrateRequest, Migrate);
+start_job_command!(job_start_verify, verification::VerifyRequest, Verify);
 
 #[tauri::command]
 fn job_list(jobs: State<'_, jobs::JobManager>) -> Vec<jobs::JobSnapshot> {
@@ -735,6 +737,8 @@ pub fn run() {
             job_start_sort,
             job_start_strip_metadata,
             job_start_migrate,
+            job_start_verify,
+            verification::verification_source_matches,
             job_list,
             job_cancel,
             job_retry,

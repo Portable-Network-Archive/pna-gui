@@ -40,10 +40,18 @@ async function waitForJob(jobId: string) {
     },
     { timeout: 30_000, timeoutMsg: `job ${jobId} did not finish` },
   );
-  const jobs =
-    await invokeTauri<Array<{ id: string; status: string; error?: string }>>(
-      "job_list",
-    );
+  const jobs = await invokeTauri<
+    Array<{
+      id: string;
+      status: string;
+      error?: string;
+      verificationReport?: {
+        conclusion: string;
+        filesChecked: number;
+        checks: Array<{ code: string; status: string }>;
+      };
+    }>
+  >("job_list");
   return jobs.find((job) => job.id === jobId)!;
 }
 
@@ -235,5 +243,58 @@ describe("Tauri archive browser", () => {
     });
     expect(preview.text).toContain("content added through the real append job");
     await invokeTauri("archive_close", { handle: opened.handle });
+  });
+
+  it("verifies encrypted content with correct and wrong passwords through real job IPC", async () => {
+    // E2E-VERIFY-COMPLETE-ENCRYPTED
+    const runtime = resolve(import.meta.dirname, "../../.e2e/runtime-verify");
+    rmSync(runtime, { recursive: true, force: true });
+    mkdirSync(runtime, { recursive: true });
+    const source = resolve(runtime, "verify.txt");
+    const archive = resolve(runtime, "verify.pna");
+    writeFileSync(source, "real encrypted verification content\n");
+
+    const create = await invokeTauri<{ id: string }>("job_start_create", {
+      request: {
+        sources: [source],
+        outputPath: archive,
+        overwrite: false,
+        options: {
+          solid: false,
+          compression: "store",
+          encryption: "aes",
+          password: "secret",
+          preservePermissions: true,
+          reproducible: false,
+        },
+      },
+    });
+    expect((await waitForJob(create.id)).status).toBe("succeeded");
+
+    const correct = await invokeTauri<{ id: string }>("job_start_verify", {
+      request: {
+        archivePath: archive,
+        password: "secret",
+        mode: "complete",
+      },
+    });
+    const correctResult = await waitForJob(correct.id);
+    expect(correctResult.status).toBe("succeeded");
+    expect(correctResult.verificationReport?.conclusion).toBe("passed");
+    expect(correctResult.verificationReport?.filesChecked).toBe(1);
+
+    const wrong = await invokeTauri<{ id: string }>("job_start_verify", {
+      request: {
+        archivePath: archive,
+        password: "wrong",
+        mode: "complete",
+      },
+    });
+    const wrongResult = await waitForJob(wrong.id);
+    expect(wrongResult.status).toBe("succeeded");
+    expect(wrongResult.verificationReport?.conclusion).toBe("issues_found");
+    expect(wrongResult.verificationReport?.checks).toContainEqual(
+      expect.objectContaining({ code: "file_contents", status: "failed" }),
+    );
   });
 });

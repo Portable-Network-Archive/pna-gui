@@ -180,6 +180,8 @@ function installInvokeHandler(options?: {
           return { id: "job-strip", kind: "strip", status: "queued" };
         case "job_start_migrate":
           return { id: "job-migrate", kind: "migrate", status: "queued" };
+        case "job_start_verify":
+          return { id: "job-verify", kind: "verify", status: "queued" };
         case "job_list":
           return [];
         default:
@@ -193,6 +195,11 @@ async function renderHome(recentItems: ArchiveRecent[] = []) {
   installInvokeHandler({ recentItems });
   renderApp();
   await screen.findByRole("heading", { name: "Recent archives" });
+  // The heading renders before the async bootstrap fetch resolves, so wait
+  // for the fetched list itself before callers query it synchronously.
+  if (recentItems.length > 0) {
+    await screen.findByText(recentItems[0].displayName);
+  }
 }
 
 function renderApp() {
@@ -227,6 +234,70 @@ describe("application shell", () => {
     bridge.menuHandler = undefined;
     bridge.jobHandlers = [];
     document.documentElement.lang = "en";
+  });
+
+  it("[UI-VERIFY-BROWSER-ENTRY] starts factual verification from the archive toolbar", async () => {
+    await openRecentArchive();
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+    const dialog = screen.getByRole("dialog", { name: "Verify archive" });
+    expect(dialog).toHaveTextContent("demo.pna");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Start verification" }),
+    );
+    expect(bridge.invoke).toHaveBeenCalledWith("job_start_verify", {
+      request: {
+        archivePath: recent.path,
+        password: null,
+        mode: "quick",
+      },
+    });
+  });
+
+  it("[UI-VERIFY-NONINTERRUPTIVE-COMPLETE] retains a completed result without stealing focus", async () => {
+    await openRecentArchive();
+    const completedVerification: JobSnapshot = {
+      id: "job-verify-1",
+      kind: "verify",
+      status: "succeeded",
+      phase: "completed",
+      currentItem: null,
+      completedUnits: 2,
+      totalUnits: 2,
+      outputPath: null,
+      error: null,
+      errorCode: null,
+      warnings: [],
+      verificationReport: {
+        archivePath: recent.path,
+        sourceSize: 2048,
+        sourceModifiedAt: 1_700_000_000,
+        completedAt: 1_700_000_010,
+        mode: "quick",
+        conclusion: "passed",
+        encrypted: false,
+        solid: false,
+        entriesChecked: 2,
+        filesChecked: 0,
+        bytesChecked: 0,
+        failedChecks: 0,
+        notCheckedChecks: 1,
+        checksOmitted: 0,
+        checks: [],
+      },
+    };
+
+    act(() =>
+      bridge.jobHandlers.forEach((handler) =>
+        handler({ payload: completedVerification }),
+      ),
+    );
+
+    expect(
+      screen.queryByRole("dialog", { name: "Verification results" }),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "View results" }),
+    ).toBeVisible();
   });
 
   it("[UI-HOME-EMPTY] renders the empty English home state", async () => {

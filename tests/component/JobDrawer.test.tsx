@@ -190,6 +190,97 @@ describe("background job drawer", () => {
     expect(onOpenArchive).not.toHaveBeenCalled();
   });
 
+  it("[UI-VERIFY-JOB-RESULT] keeps completed verification evidence available from the job drawer", async () => {
+    const verification = {
+      ...completed,
+      kind: "verify" as const,
+      outputPath: null,
+      verificationReport: {
+        archivePath: "/output/archive.pna",
+        sourceSize: 4096,
+        sourceModifiedAt: 1784160000,
+        completedAt: 1784160300,
+        mode: "quick" as const,
+        conclusion: "passed" as const,
+        encrypted: false,
+        solid: false,
+        entriesChecked: 4,
+        filesChecked: 0,
+        bytesChecked: 0,
+        failedChecks: 0,
+        notCheckedChecks: 1,
+        checksOmitted: 0,
+        checks: [],
+      },
+    } satisfies JobSnapshot;
+    const onViewVerification = vi.fn();
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") return [verification];
+      return verification;
+    });
+
+    render(
+      <I18nProvider>
+        <JobDrawer onViewVerification={onViewVerification} />
+      </I18nProvider>,
+    );
+
+    const bar = await screen.findByRole("region", { name: "Background jobs" });
+    expect(within(bar).getByText("Archive verification")).toBeVisible();
+    expect(
+      within(bar).getByText("Structure verified; file contents not checked"),
+    ).toBeVisible();
+    expect(within(bar).queryByText("source/input.txt")).not.toBeInTheDocument();
+    await userEvent.click(
+      within(bar).getByRole("button", { name: "View results" }),
+    );
+    expect(onViewVerification).toHaveBeenCalledWith(
+      verification.verificationReport,
+    );
+  });
+
+  it("[UI-VERIFY-JOB-ISSUES] signals a verification that found issues instead of a generic success", async () => {
+    const verification = {
+      ...completed,
+      kind: "verify" as const,
+      outputPath: null,
+      verificationReport: {
+        archivePath: "/output/archive.pna",
+        sourceSize: 4096,
+        sourceModifiedAt: 1784160000,
+        completedAt: 1784160300,
+        mode: "complete" as const,
+        conclusion: "issues_found" as const,
+        encrypted: false,
+        solid: false,
+        entriesChecked: 4,
+        filesChecked: 3,
+        bytesChecked: 2048,
+        failedChecks: 1,
+        notCheckedChecks: 0,
+        checksOmitted: 0,
+        checks: [],
+      },
+    } satisfies JobSnapshot;
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") return [verification];
+      return verification;
+    });
+
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+
+    const bar = await screen.findByRole("region", { name: "Background jobs" });
+    expect(within(bar).getByText("Some checks failed")).toBeVisible();
+    expect(within(bar).queryByText("Completed")).not.toBeInTheDocument();
+    expect(
+      within(bar).getByText("Archive verification").closest("article"),
+    ).toHaveAttribute("data-verification", "issues_found");
+  });
+
   it("[UI-UX-JOB-RECOVERABLE-CONFLICT] localizes an output collision and keeps its file discoverable", async () => {
     Object.defineProperty(navigator, "languages", {
       configurable: true,
