@@ -154,6 +154,13 @@
   color: var(--app-error) !important;
 }
 
+.errorRecovery {
+  overflow-wrap: anywhere;
+  color: #475467 !important;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
 .warning {
   overflow-wrap: anywhere;
   color: #8a5a00 !important;

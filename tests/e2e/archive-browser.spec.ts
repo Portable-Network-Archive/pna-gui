@@ -51,14 +51,28 @@ describe("Tauri archive browser", () => {
   it("unlocks an encrypted archive and previews decrypted content through the desktop runtime", async () => {
     // E2E-TAURI-CLI-OPEN, E2E-TAURI-ENCRYPTED-PASSWORD,
     // E2E-TAURI-REAL-SEARCH, E2E-TAURI-REAL-PREVIEW,
-    // E2E-TAURI-ENCRYPTED-PREVIEW, E2E-TAURI-SESSION-CLOSE
+    // E2E-TAURI-ENCRYPTED-PREVIEW, E2E-TAURI-ENCRYPTED-WRONG-PASSWORD,
+    // E2E-TAURI-SESSION-CLOSE
     const browserView = $('[data-testid="archive-browser"]');
     const passwordInput = $('input[type="password"]');
     await passwordInput.waitForExist({ timeout: 30_000 });
     await expect(browserView).not.toBeDisplayed();
     await passwordInput.click();
-    await passwordInput.setValue("secret");
+    await passwordInput.setValue("definitely-wrong");
     const submit = $('button[type="submit"]');
+    await submit.waitForEnabled();
+    await submit.click();
+
+    const passwordError = $('[role="alert"]');
+    await passwordError.waitForDisplayed({ timeout: 30_000 });
+    await expect(passwordError).toHaveText(
+      expect.stringMatching(/password is incorrect|パスワードが正しくない/iu),
+    );
+    await expect(browserView).not.toBeDisplayed();
+    await expect($('[data-testid="archive-preview"]')).not.toBeDisplayed();
+
+    await passwordInput.click();
+    await passwordInput.setValue("secret");
     await submit.waitForEnabled();
     await submit.click();
 
@@ -155,5 +169,71 @@ describe("Tauri archive browser", () => {
     expect(existsSync(resolve(runtime, "gui-created", "gui-created.txt"))).toBe(
       false,
     );
+  });
+
+  it("appends content atomically and reopens it through real Rust IPC", async () => {
+    // E2E-UPDATE-APPEND-REOPEN
+    const runtime = resolve(import.meta.dirname, "../../.e2e/runtime-append");
+    rmSync(runtime, { recursive: true, force: true });
+    mkdirSync(runtime, { recursive: true });
+    const original = resolve(runtime, "original.txt");
+    const added = resolve(runtime, "added.txt");
+    const archive = resolve(runtime, "updated.pna");
+    writeFileSync(original, "original content\n");
+    writeFileSync(added, "content added through the real append job\n");
+
+    const create = await invokeTauri<{ id: string }>("job_start_create", {
+      request: {
+        sources: [original],
+        outputPath: archive,
+        overwrite: false,
+        options: {
+          solid: false,
+          compression: "zstd",
+          encryption: "aes",
+          password: "secret",
+          preservePermissions: true,
+          reproducible: false,
+        },
+      },
+    });
+    expect((await waitForJob(create.id)).status).toBe("succeeded");
+
+    const append = await invokeTauri<{ id: string }>("job_start_append", {
+      request: {
+        archivePath: archive,
+        sources: [added],
+        options: {
+          solid: false,
+          compression: "zstd",
+          encryption: "aes",
+          password: "secret",
+          preservePermissions: true,
+          reproducible: false,
+        },
+      },
+    });
+    expect((await waitForJob(append.id)).status).toBe("succeeded");
+
+    const opened = await invokeTauri<{ handle: string }>("archive_open", {
+      path: archive,
+      password: "secret",
+    });
+    const results = await invokeTauri<{
+      items: Array<{ id: string; path: string }>;
+    }>("archive_search", {
+      handle: opened.handle,
+      query: "added.txt",
+      cursor: null,
+      limit: 20,
+    });
+    expect(results.items.map((entry) => entry.path)).toContain("added.txt");
+    const preview = await invokeTauri<{ text: string }>("archive_preview", {
+      handle: opened.handle,
+      entryId: results.items[0].id,
+      maxBytes: 64 * 1024,
+    });
+    expect(preview.text).toContain("content added through the real append job");
+    await invokeTauri("archive_close", { handle: opened.handle });
   });
 });

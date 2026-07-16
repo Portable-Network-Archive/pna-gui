@@ -57,6 +57,60 @@ fn job_start_extract(
 }
 
 #[tauri::command]
+fn job_start_append(
+    app: AppHandle,
+    jobs: State<'_, jobs::JobManager>,
+    request: operations::AppendRequest,
+) -> Result<jobs::JobSnapshot, String> {
+    jobs.start(jobs::JobRequest::Append(request), job_observer(app))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn job_start_delete_entries(
+    app: AppHandle,
+    jobs: State<'_, jobs::JobManager>,
+    request: operations::DeleteEntriesRequest,
+) -> Result<jobs::JobSnapshot, String> {
+    jobs.start(jobs::JobRequest::Delete(request), job_observer(app))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn job_start_rename_entry(
+    app: AppHandle,
+    jobs: State<'_, jobs::JobManager>,
+    request: operations::RenameEntryRequest,
+) -> Result<jobs::JobSnapshot, String> {
+    jobs.start(jobs::JobRequest::Rename(request), job_observer(app))
+        .map_err(|error| error.to_string())
+}
+
+macro_rules! start_job_command {
+    ($name:ident, $request:ty, $variant:ident) => {
+        #[tauri::command]
+        fn $name(
+            app: AppHandle,
+            jobs: State<'_, jobs::JobManager>,
+            request: $request,
+        ) -> Result<jobs::JobSnapshot, String> {
+            jobs.start(jobs::JobRequest::$variant(request), job_observer(app))
+                .map_err(|error| error.to_string())
+        }
+    };
+}
+
+start_job_command!(job_start_split, operations::SplitRequest, Split);
+start_job_command!(job_start_concat, operations::ConcatRequest, Concat);
+start_job_command!(job_start_sort, operations::SortRequest, Sort);
+start_job_command!(
+    job_start_strip_metadata,
+    operations::StripMetadataRequest,
+    Strip
+);
+start_job_command!(job_start_migrate, operations::MigrateRequest, Migrate);
+
+#[tauri::command]
 fn job_list(jobs: State<'_, jobs::JobManager>) -> Vec<jobs::JobSnapshot> {
     jobs.list()
 }
@@ -673,6 +727,14 @@ pub fn run() {
             extract,
             job_start_create,
             job_start_extract,
+            job_start_append,
+            job_start_delete_entries,
+            job_start_rename_entry,
+            job_start_split,
+            job_start_concat,
+            job_start_sort,
+            job_start_strip_metadata,
+            job_start_migrate,
             job_list,
             job_cancel,
             job_retry,

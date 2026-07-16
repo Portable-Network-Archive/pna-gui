@@ -242,7 +242,7 @@ export default function JobDrawer({
             disabled={visible.every((job) => ACTIVE.has(job.status))}
             onClick={() => void clearFinished()}
           >
-            {t("clearFinishedJobs")}
+            {t("clearFinishedJobs").replace("{count}", String(finishedCount))}
           </Button>
         </div>
         <div className={styles.centerList}>
@@ -307,6 +307,8 @@ function JobRow({
   const canCancel = job.status === "queued" || job.status === "running";
   const canRetry = ["failed", "cancelled", "interrupted"].includes(job.status);
   const canDismiss = !ACTIVE.has(job.status);
+  const canOpenArchiveOutput = !["extract", "split"].includes(job.kind);
+  const presentedError = job.error ? presentJobError(job, t) : undefined;
   const progress = job.totalUnits
     ? `${job.completedUnits} ${t("of")} ${job.totalUnits}`
     : `${job.completedUnits}`;
@@ -337,7 +339,20 @@ function JobRow({
       <div className={styles.jobInfo}>
         <div className={styles.jobTitle}>
           <strong>
-            {job.kind === "create" ? t("createJob") : t("extractJob")}
+            {
+              {
+                create: t("createJob"),
+                extract: t("extractJob"),
+                append: t("appendJob"),
+                delete: t("deleteJob"),
+                rename: t("renameJob"),
+                split: t("splitJob"),
+                concat: t("concatJob"),
+                sort: t("sortJob"),
+                strip: t("stripJob"),
+                migrate: t("migrateJob"),
+              }[job.kind]
+            }
           </strong>
           <span>{status}</span>
         </div>
@@ -368,9 +383,14 @@ function JobRow({
           </small>
         )}
         {!compact && <small className={styles.numeric}>{progress}</small>}
-        {job.error && (
+        {presentedError && (
           <small className={styles.error} role="alert">
-            {job.error}
+            {presentedError.message}
+          </small>
+        )}
+        {presentedError?.action && (
+          <small className={styles.errorRecovery}>
+            {presentedError.action}
           </small>
         )}
         {job.warnings?.map((warning) => (
@@ -415,7 +435,7 @@ function JobRow({
           </Button>
         )}
         {job.status === "succeeded" &&
-          job.kind === "create" &&
+          canOpenArchiveOutput &&
           job.outputPath &&
           onOpenArchive && (
             <Button
@@ -425,7 +445,9 @@ function JobRow({
               data-testid="open-created-archive"
               onClick={() => void onOpenArchive(job.outputPath!)}
             >
-              {t("openCreatedArchive")}
+              {job.kind === "create"
+                ? t("openCreatedArchive")
+                : t("openJobOutput")}
             </Button>
           )}
         {canDismiss && (
@@ -442,6 +464,19 @@ function JobRow({
       </div>
     </article>
   );
+}
+
+function presentJobError(
+  job: JobSnapshot,
+  t: (key: TranslationKey) => string,
+): { message: string; action?: string } {
+  if (job.errorCode === "OUTPUT_ALREADY_EXISTS") {
+    return {
+      message: t("jobOutputAlreadyExists"),
+      action: t("jobOutputAlreadyExistsAction"),
+    };
+  }
+  return { message: job.error ?? t("jobStatusFailed") };
 }
 
 function splitResultPath(path: string): { name: string; parent: string } {

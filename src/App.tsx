@@ -14,17 +14,27 @@ import {
   PlusIcon,
   ReloadIcon,
   DownloadIcon,
+  Pencil2Icon,
+  TrashIcon,
+  MixerHorizontalIcon,
+  DotsHorizontalIcon,
 } from "@radix-ui/react-icons";
 import {
+  AlertDialog,
   Button,
   Dialog,
+  DropdownMenu,
   Flex,
   Spinner,
   Text,
   TextField,
 } from "@radix-ui/themes";
 import { getMatches } from "@tauri-apps/plugin-cli";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import {
+  open as openDialog,
+  save as saveDialog,
+} from "@tauri-apps/plugin-dialog";
 import { Create } from "./tabs";
 import { registerE2eBridge } from "@pna/e2e-bridge";
 import { archiveApi, normalizeAppError } from "./features/archive/api";
@@ -59,13 +69,17 @@ import type {
   SortSpec,
 } from "./features/archive/types";
 import styles from "./App.module.css";
-import { jobApi } from "./features/jobs/api";
+import { jobApi, type JobSnapshot } from "./features/jobs/api";
 import JobDrawer from "./features/jobs/JobDrawer";
 
 registerE2eBridge();
 
 type AppView = "home" | "browser" | "create";
 type TreePages = Record<string, ArchiveEntry[]>;
+interface ActiveArchiveSession {
+  archive: OpenArchiveResult;
+  password?: string;
+}
 
 export default function App() {
   return (
@@ -90,6 +104,11 @@ function AppContent() {
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string>();
   const openingRef = useRef(false);
+  const cliSourceHandledRef = useRef(false);
+  const activeArchiveRef = useRef<ActiveArchiveSession | undefined>(undefined);
+  const pendingRefreshRef = useRef<
+    { path: string; password?: string } | undefined
+  >(undefined);
 
   const refreshBootstrap = useCallback(async () => {
     try {
@@ -107,11 +126,26 @@ function AppContent() {
       setError(undefined);
       try {
         const result = await archiveApi.open(path, suppliedPassword);
+        const previous = activeArchiveRef.current;
+        activeArchiveRef.current = {
+          archive: result,
+          password: suppliedPassword,
+        };
         setOpenArchive(result);
         setView("browser");
         setPasswordPath(undefined);
         setPassword("");
         setPasswordError(undefined);
+        if (previous && previous.archive.handle !== result.handle) {
+          try {
+            await archiveApi.close(previous.archive.handle);
+          } catch (caught) {
+            setError({
+              ...normalizeAppError(caught),
+              context: previous.archive.summary.path,
+            });
+          }
+        }
         await refreshBootstrap();
       } catch (caught) {
         const appError = normalizeAppError(caught);
@@ -138,18 +172,24 @@ function AppContent() {
   );
 
   const chooseArchive = useCallback(async () => {
-    const selected = await openDialog({
-      title: t("openArchiveTitle"),
-      multiple: false,
-      filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
-    });
-    if (typeof selected === "string") await openArchivePath(selected);
+    try {
+      const selected = await openDialog({
+        title: t("openArchiveTitle"),
+        multiple: false,
+        filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
+      });
+      if (typeof selected === "string") await openArchivePath(selected);
+    } catch (caught) {
+      setError(normalizeAppError(caught));
+    }
   }, [openArchivePath, t]);
 
   const goHome = useCallback(async () => {
     if (openArchive) {
       await archiveApi.close(openArchive.handle).catch(() => undefined);
     }
+    activeArchiveRef.current = undefined;
+    pendingRefreshRef.current = undefined;
     setOpenArchive(undefined);
     setView("home");
     setError(undefined);
@@ -162,49 +202,98 @@ function AppContent() {
   useEffect(() => {
     let disposed = false;
     let cleanups: Array<() => void> = [];
-    void import("@tauri-apps/api/webviewWindow").then(
-      async ({ getCurrentWebviewWindow }) => {
-        if (disposed) return;
-        const appWindow = getCurrentWebviewWindow();
-        const unlistenDrop = await appWindow.onDragDropEvent((event) => {
-          if (view === "create") return;
-          if (event.payload.type === "enter") setDragActive(true);
-          if (event.payload.type === "leave") setDragActive(false);
-          if (event.payload.type === "drop") {
-            setDragActive(false);
-            const archive = event.payload.paths.find((path) =>
-              path.toLowerCase().endsWith(".pna"),
-            );
-            if (archive) void openArchivePath(archive);
-          }
-        });
-        const unlistenMenu = await appWindow.listen<"extract" | "create">(
-          "switch_tab",
-          (event) => {
-            if (event.payload === "create") setView("create");
-            else void chooseArchive();
-          },
-        );
-        cleanups = [unlistenDrop, unlistenMenu];
-      },
-    );
-    void getMatches()
-      .then((matches) => {
-        const source = matches.args.source?.value;
-        const path =
-          typeof source === "string"
-            ? source
-            : Array.isArray(source)
-              ? source[0]
-              : null;
-        if (path) return openArchivePath(path);
-      })
-      .catch(() => undefined);
+    void (async () => {
+      if (disposed) return;
+      const appWindow = getCurrentWebviewWindow();
+      const unlistenDrop = await appWindow.onDragDropEvent((event) => {
+        if (view === "create") return;
+        if (event.payload.type === "enter") setDragActive(true);
+        if (event.payload.type === "leave") setDragActive(false);
+        if (event.payload.type === "drop") {
+          setDragActive(false);
+          const archive = event.payload.paths.find((path) =>
+            path.toLowerCase().endsWith(".pna"),
+          );
+          if (archive) void openArchivePath(archive);
+        }
+      });
+      const unlistenMenu = await appWindow.listen<"extract" | "create">(
+        "switch_tab",
+        (event) => {
+          if (event.payload === "create") setView("create");
+          else void chooseArchive();
+        },
+      );
+      cleanups = [unlistenDrop, unlistenMenu];
+    })();
+    if (!cliSourceHandledRef.current) {
+      cliSourceHandledRef.current = true;
+      void getMatches()
+        .then((matches) => {
+          const source = matches.args.source?.value;
+          const path =
+            typeof source === "string"
+              ? source
+              : Array.isArray(source)
+                ? source[0]
+                : null;
+          if (path) return openArchivePath(path);
+        })
+        .catch(() => undefined);
+    }
     return () => {
       disposed = true;
       cleanups.forEach((cleanup) => cleanup());
     };
   }, [chooseArchive, openArchivePath, view]);
+
+  const refreshOpenArchive = useCallback(
+    async (path: string) => {
+      const current = activeArchiveRef.current;
+      if (!current || current.archive.summary.path !== path) return;
+      const request = { path, password: current.password };
+      if (openingRef.current) {
+        pendingRefreshRef.current = request;
+        return;
+      }
+      await openArchivePath(request.path, request.password);
+    },
+    [openArchivePath],
+  );
+
+  useEffect(() => {
+    if (busy) return;
+    const pending = pendingRefreshRef.current;
+    if (!pending) return;
+    pendingRefreshRef.current = undefined;
+    if (activeArchiveRef.current?.archive.summary.path === pending.path) {
+      void openArchivePath(pending.path, pending.password);
+    }
+  }, [busy, openArchivePath]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      if (disposed) return;
+      unlisten = await getCurrentWebviewWindow().listen<JobSnapshot>(
+        "job-update",
+        (event) => {
+          if (
+            event.payload.status === "succeeded" &&
+            ["append", "delete", "rename"].includes(event.payload.kind) &&
+            event.payload.outputPath
+          ) {
+            void refreshOpenArchive(event.payload.outputPath);
+          }
+        },
+      );
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [refreshOpenArchive]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -247,6 +336,7 @@ function AppContent() {
       )}
       {view === "browser" && openArchive && (
         <BrowserView
+          key={openArchive.handle}
           archive={openArchive}
           error={error}
           onDismissError={() => setError(undefined)}
@@ -582,9 +672,51 @@ function BrowserView({
   const [treePages, setTreePages] = useState<TreePages>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["root"]));
   const [extractOpen, setExtractOpen] = useState(false);
+  const [appendOpen, setAppendOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const editPasswordRequired =
+    archive.summary.solid &&
+    archive.summary.encryptionMethods.some(
+      (method) => method.toLowerCase() !== "none",
+    );
+  const renameValidationError = !renameValue.trim()
+    ? t("renameNameRequired")
+    : renameValue.includes("/") || renameValue.includes("\\")
+      ? t("renameNameContainsSeparator")
+      : undefined;
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<AppErrorDto>();
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const currentTrail = history[historyIndex];
   const current = currentTrail[currentTrail.length - 1];
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (
+        !details ||
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement
+      )
+        return;
+      if (event.key === "F2") {
+        event.preventDefault();
+        setEditError(undefined);
+        setRenameValue(details.entry.name);
+        setRenameOpen(true);
+      } else if (event.key === "Delete") {
+        event.preventDefault();
+        setEditError(undefined);
+        setDeleteOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [details]);
 
   const loadTreeChildren = useCallback(
     async (parentId?: string) => {
@@ -716,15 +848,71 @@ function BrowserView({
           <span>{archive.summary.displayName}</span>
         </button>
         <div className={styles.toolbarDivider} />
-        <button className={styles.toolbarButton} onClick={onOpen}>
-          <FolderGlyph /> {t("openAnotherArchive")}
+        <button
+          className={styles.toolbarButton}
+          aria-label={t("openAnotherArchive")}
+          title={t("openAnotherArchive")}
+          onClick={onOpen}
+        >
+          <FolderGlyph />
+          <span className={styles.toolbarLabel}>{t("openAnotherArchive")}</span>
         </button>
         <button
           className={styles.toolbarButton}
+          aria-label={t("addFilesToArchive")}
+          title={t("addFilesToArchive")}
+          onClick={() => setAppendOpen(true)}
+        >
+          <PlusIcon aria-hidden="true" />
+          <span className={styles.toolbarLabel}>{t("addFilesToArchive")}</span>
+        </button>
+        <button
+          className={styles.toolbarButton}
+          aria-label={t("extract")}
+          title={t("extract")}
           onClick={() => setExtractOpen(true)}
         >
-          <DownloadIcon aria-hidden="true" /> {t("extract")}
+          <DownloadIcon aria-hidden="true" />
+          <span className={styles.toolbarLabel}>{t("extract")}</span>
         </button>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            <button
+              className={styles.toolbarButton}
+              aria-label={t("more")}
+              title={t("more")}
+            >
+              <DotsHorizontalIcon aria-hidden="true" />
+              <span className={styles.toolbarLabel}>{t("more")}</span>
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="start">
+            <DropdownMenu.Item
+              disabled={!details}
+              onSelect={() => {
+                setEditError(undefined);
+                setRenameValue(details?.entry.name ?? "");
+                setRenameOpen(true);
+              }}
+            >
+              <Pencil2Icon aria-hidden="true" /> {t("rename")}
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              color="red"
+              disabled={!details}
+              onSelect={() => {
+                setEditError(undefined);
+                setDeleteOpen(true);
+              }}
+            >
+              <TrashIcon aria-hidden="true" /> {t("delete")}
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item onSelect={() => setToolsOpen(true)}>
+              <MixerHorizontalIcon aria-hidden="true" /> {t("archiveTools")}
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
         <div className={styles.toolbarSpacer} />
         <form
           className={styles.searchBox}
@@ -994,9 +1182,648 @@ function BrowserView({
         archive={archive}
         selectedPath={details?.entry.path}
         onOpenChange={setExtractOpen}
-        onError={onError}
+      />
+      <AppendDialog
+        open={appendOpen}
+        archive={archive}
+        onOpenChange={setAppendOpen}
+      />
+      <Dialog.Root
+        open={renameOpen}
+        onOpenChange={(open) => {
+          setRenameOpen(open);
+          if (!open) {
+            setEditError(undefined);
+            setEditPassword("");
+          }
+        }}
+      >
+        <Dialog.Content maxWidth="480px">
+          <Dialog.Title>{t("renameArchiveEntry")}</Dialog.Title>
+          <Dialog.Description>{details?.entry.path ?? ""}</Dialog.Description>
+          <div className={styles.extractForm}>
+            <label>
+              {t("newName")}
+              <input
+                aria-label={t("newName")}
+                aria-describedby={
+                  renameValidationError ? "rename-name-error" : undefined
+                }
+                aria-invalid={Boolean(renameValidationError)}
+                autoFocus
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+              />
+            </label>
+            {editPasswordRequired && (
+              <label>
+                {t("password")}
+                <input
+                  type="password"
+                  value={editPassword}
+                  onChange={(event) => setEditPassword(event.target.value)}
+                />
+              </label>
+            )}
+            {renameValidationError && (
+              <p
+                className={styles.fieldError}
+                id="rename-name-error"
+                role="alert"
+              >
+                {renameValidationError}
+              </p>
+            )}
+            {editError && (
+              <div className={styles.formError} role="alert">
+                <strong>{editError.message}</strong>
+                {editError.userAction && <span>{editError.userAction}</span>}
+              </div>
+            )}
+          </div>
+          <Flex mt="5" gap="3" justify="end">
+            <Button
+              variant="soft"
+              color="gray"
+              onClick={() => setRenameOpen(false)}
+            >
+              {t("cancel")}
+            </Button>
+            <Button
+              disabled={
+                !details ||
+                Boolean(renameValidationError) ||
+                editSubmitting ||
+                (editPasswordRequired && !editPassword)
+              }
+              onClick={async () => {
+                if (!details) return;
+                setEditSubmitting(true);
+                try {
+                  const parent = details.entry.path
+                    .split("/")
+                    .slice(0, -1)
+                    .join("/");
+                  await jobApi.startRename({
+                    archivePath: archive.summary.path,
+                    sourcePath: details.entry.path,
+                    destinationPath: parent
+                      ? `${parent}/${renameValue.trim()}`
+                      : renameValue.trim(),
+                    password: editPassword || null,
+                  });
+                  setRenameOpen(false);
+                  setEditPassword("");
+                } catch (caught) {
+                  setEditError(normalizeAppError(caught));
+                } finally {
+                  setEditSubmitting(false);
+                }
+              }}
+            >
+              {t("renameItem")}
+            </Button>
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
+      <AlertDialog.Root
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) {
+            setEditError(undefined);
+            setEditPassword("");
+          }
+        }}
+      >
+        <AlertDialog.Content maxWidth="480px">
+          <AlertDialog.Title>
+            {t("deleteFromArchiveQuestion")}
+          </AlertDialog.Title>
+          <AlertDialog.Description>
+            {t("deleteFromArchiveDescription")}
+          </AlertDialog.Description>
+          <p>
+            <strong>{details?.entry.path ?? ""}</strong>
+          </p>
+          {editPasswordRequired && (
+            <label className={styles.extractForm}>
+              {t("password")}
+              <input
+                type="password"
+                value={editPassword}
+                onChange={(event) => setEditPassword(event.target.value)}
+              />
+            </label>
+          )}
+          {editError && (
+            <div className={styles.formError} role="alert">
+              <strong>{editError.message}</strong>
+              {editError.userAction && <span>{editError.userAction}</span>}
+            </div>
+          )}
+          <Flex mt="5" gap="3" justify="end">
+            <AlertDialog.Cancel>
+              <Button variant="soft" color="gray">
+                {t("cancel")}
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                color="red"
+                disabled={
+                  !details ||
+                  editSubmitting ||
+                  (editPasswordRequired && !editPassword)
+                }
+                onClick={async (event) => {
+                  event.preventDefault();
+                  if (!details) return;
+                  setEditSubmitting(true);
+                  try {
+                    await jobApi.startDelete({
+                      archivePath: archive.summary.path,
+                      entries: [details.entry.path],
+                      password: editPassword || null,
+                    });
+                    setDeleteOpen(false);
+                    setEditPassword("");
+                  } catch (caught) {
+                    setEditError(normalizeAppError(caught));
+                  } finally {
+                    setEditSubmitting(false);
+                  }
+                }}
+              >
+                {t("deleteFromArchive")}
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+      <ArchiveToolsDialog
+        open={toolsOpen}
+        archive={archive}
+        onOpenChange={setToolsOpen}
       />
     </div>
+  );
+}
+
+type ArchiveTool = "split" | "concat" | "sort" | "strip" | "migrate";
+
+function ArchiveToolsDialog({
+  open,
+  archive,
+  onOpenChange,
+}: {
+  open: boolean;
+  archive: OpenArchiveResult;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const [operation, setOperation] = useState<ArchiveTool>("split");
+  const [output, setOutput] = useState("");
+  const [parts, setParts] = useState<string[]>([]);
+  const [maxPartMb, setMaxPartMb] = useState("1024");
+  const [password, setPassword] = useState("");
+  const [descending, setDescending] = useState(false);
+  const [keepTimestamps, setKeepTimestamps] = useState(false);
+  const [keepPermissions, setKeepPermissions] = useState(false);
+  const [keepXattrs, setKeepXattrs] = useState(false);
+  const [keepPrivateChunks, setKeepPrivateChunks] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<AppErrorDto>();
+  const encrypted = archive.summary.encryptionMethods.some(
+    (method) => method.toLowerCase() !== "none",
+  );
+
+  const chooseTarget = async () => {
+    setSubmitError(undefined);
+    try {
+      if (operation === "split") {
+        const selected = await openDialog({
+          directory: true,
+          multiple: false,
+          title: t("chooseSplitDestination"),
+        });
+        if (typeof selected === "string") setOutput(selected);
+      } else if (operation === "concat") {
+        const selected = await openDialog({
+          multiple: false,
+          filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
+        });
+        if (typeof selected === "string") setParts([selected]);
+      } else {
+        const selected = await saveDialog({
+          defaultPath: archive.summary.path.replace(
+            /\.pna$/i,
+            `-${operation}.pna`,
+          ),
+          filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
+        });
+        if (typeof selected === "string") setOutput(selected);
+      }
+    } catch (caught) {
+      setSubmitError(normalizeAppError(caught));
+    }
+  };
+
+  const chooseConcatOutput = async () => {
+    setSubmitError(undefined);
+    try {
+      const selected = await saveDialog({
+        defaultPath: archive.summary.path.replace(/\.part\d+\.pna$/i, ".pna"),
+        filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
+      });
+      if (typeof selected === "string") setOutput(selected);
+    } catch (caught) {
+      setSubmitError(normalizeAppError(caught));
+    }
+  };
+
+  const start = async () => {
+    setSubmitError(undefined);
+    setSubmitting(true);
+    try {
+      if (operation === "split") {
+        await jobApi.startSplit({
+          archivePath: archive.summary.path,
+          outputDirectory: output,
+          maxPartBytes: Math.round(Number(maxPartMb) * 1024 * 1024),
+        });
+      } else if (operation === "concat") {
+        await jobApi.startConcat({ parts, outputPath: output });
+      } else if (operation === "sort") {
+        await jobApi.startSort({
+          archivePath: archive.summary.path,
+          outputPath: output,
+          password: password || null,
+          descending,
+        });
+      } else if (operation === "strip") {
+        await jobApi.startStrip({
+          archivePath: archive.summary.path,
+          outputPath: output,
+          password: password || null,
+          keepTimestamps,
+          keepPermissions,
+          keepXattrs,
+          keepPrivateChunks,
+        });
+      } else {
+        await jobApi.startMigrate({
+          archivePath: archive.summary.path,
+          outputPath: output,
+          password: password || null,
+        });
+      }
+      onOpenChange(false);
+      setOutput("");
+      setParts([]);
+      setPassword("");
+    } catch (caught) {
+      setSubmitError(normalizeAppError(caught));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const ready =
+    operation === "concat"
+      ? parts.length > 0 && Boolean(output)
+      : Boolean(output);
+  const validSize =
+    Number.isFinite(Number(maxPartMb)) && Number(maxPartMb) >= 0.001;
+  const operationSummary =
+    operation === "split"
+      ? t("splitSummary")
+      : operation === "concat"
+        ? t("concatSummary")
+        : operation === "sort"
+          ? t("sortSummary")
+          : operation === "strip"
+            ? t("stripSummary")
+            : t("migrateSummary");
+
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) {
+          setSubmitError(undefined);
+          setPassword("");
+        }
+      }}
+    >
+      <Dialog.Content maxWidth="560px">
+        <Dialog.Title>{t("archiveTools")}</Dialog.Title>
+        <Dialog.Description>{t("archiveToolsDescription")}</Dialog.Description>
+        <div className={styles.extractForm}>
+          <label>
+            {t("operation")}
+            <select
+              aria-label={t("operation")}
+              value={operation}
+              onChange={(event) => {
+                setOperation(event.target.value as ArchiveTool);
+                setOutput("");
+                setParts([]);
+                setSubmitError(undefined);
+              }}
+            >
+              <option value="split">{t("splitArchive")}</option>
+              <option value="concat">{t("concatArchive")}</option>
+              <option value="sort">{t("sortArchive")}</option>
+              <option value="strip">{t("stripMetadata")}</option>
+              <option value="migrate">{t("migrateMetadata")}</option>
+            </select>
+          </label>
+          <p className={styles.formHint}>{operationSummary}</p>
+          {operation === "split" && (
+            <label>
+              {t("maximumPartSizeMb")}
+              <input
+                aria-label={t("maximumPartSizeMb")}
+                aria-describedby={
+                  validSize ? undefined : "split-part-size-error"
+                }
+                aria-invalid={!validSize}
+                type="number"
+                min="0.001"
+                value={maxPartMb}
+                onChange={(event) => setMaxPartMb(event.target.value)}
+              />
+              {!validSize && (
+                <span
+                  className={styles.fieldError}
+                  id="split-part-size-error"
+                  role="alert"
+                >
+                  {t("invalidPartSize")}
+                </span>
+              )}
+            </label>
+          )}
+          <Button type="button" variant="soft" onClick={chooseTarget}>
+            {operation === "concat"
+              ? t("chooseParts")
+              : operation === "split"
+                ? t("chooseSplitDestination")
+                : t("chooseOutput")}
+          </Button>
+          <p
+            className={styles.destinationPreview}
+            title={operation === "concat" ? parts.join("\n") : output}
+          >
+            {operation === "concat"
+              ? parts.length
+                ? `${parts.length} ${t("items")}`
+                : t("partsNotSelected")
+              : output || t("outputNotSelected")}
+          </p>
+          {operation === "concat" && (
+            <>
+              <Button type="button" variant="soft" onClick={chooseConcatOutput}>
+                {t("chooseOutput")}
+              </Button>
+              <p className={styles.destinationPreview} title={output}>
+                {output || t("outputNotSelected")}
+              </p>
+            </>
+          )}
+          {operation === "sort" && (
+            <label className={styles.checkRow}>
+              <input
+                type="checkbox"
+                checked={descending}
+                onChange={(event) => setDescending(event.target.checked)}
+              />
+              {t("descending")}
+            </label>
+          )}
+          {operation === "strip" && (
+            <>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={keepTimestamps}
+                  onChange={(event) => setKeepTimestamps(event.target.checked)}
+                />
+                {t("keepTimestamps")}
+              </label>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={keepPermissions}
+                  onChange={(event) => setKeepPermissions(event.target.checked)}
+                />
+                {t("keepPermissions")}
+              </label>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={keepXattrs}
+                  onChange={(event) => setKeepXattrs(event.target.checked)}
+                />
+                {t("keepExtendedAttributes")}
+              </label>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={keepPrivateChunks}
+                  onChange={(event) =>
+                    setKeepPrivateChunks(event.target.checked)
+                  }
+                />
+                {t("keepPrivateChunks")}
+              </label>
+            </>
+          )}
+          {encrypted && ["sort", "strip", "migrate"].includes(operation) && (
+            <label>
+              {t("password")}
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+          )}
+          {submitError && (
+            <div className={styles.formError} role="alert">
+              <strong>{submitError.message}</strong>
+              {submitError.userAction && <span>{submitError.userAction}</span>}
+            </div>
+          )}
+        </div>
+        <Flex mt="5" gap="3" justify="end">
+          <Button
+            variant="soft"
+            color="gray"
+            onClick={() => onOpenChange(false)}
+          >
+            {t("cancel")}
+          </Button>
+          <Button
+            disabled={
+              !ready ||
+              submitting ||
+              (operation === "split" && !validSize) ||
+              (encrypted &&
+                ["sort", "strip", "migrate"].includes(operation) &&
+                !password)
+            }
+            onClick={start}
+          >
+            {t("start")}
+          </Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
+function AppendDialog({
+  open,
+  archive,
+  onOpenChange,
+}: {
+  open: boolean;
+  archive: OpenArchiveResult;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const [sources, setSources] = useState<string[]>([]);
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<AppErrorDto>();
+  const encryption = archive.summary.encryptionMethods.some((method) =>
+    method.toLowerCase().includes("camellia"),
+  )
+    ? "camellia"
+    : archive.summary.encryptionMethods.some(
+          (method) => method.toLowerCase() !== "none",
+        )
+      ? "aes"
+      : "none";
+  const passwordRequired = encryption !== "none";
+
+  const chooseFiles = async () => {
+    setSubmitError(undefined);
+    try {
+      const selected = await openDialog({ multiple: true, directory: false });
+      if (Array.isArray(selected)) setSources(selected);
+      else if (typeof selected === "string") setSources([selected]);
+    } catch (caught) {
+      setSubmitError(normalizeAppError(caught));
+    }
+  };
+  const chooseFolder = async () => {
+    setSubmitError(undefined);
+    try {
+      const selected = await openDialog({ multiple: false, directory: true });
+      if (typeof selected === "string") setSources([selected]);
+    } catch (caught) {
+      setSubmitError(normalizeAppError(caught));
+    }
+  };
+  const start = async () => {
+    setSubmitError(undefined);
+    setSubmitting(true);
+    try {
+      await jobApi.startAppend({
+        archivePath: archive.summary.path,
+        sources,
+        options: {
+          solid: archive.summary.solid,
+          compression: "zstd",
+          encryption,
+          password: encryption === "none" ? null : password || null,
+          preservePermissions: true,
+          reproducible: false,
+        },
+      });
+      onOpenChange(false);
+      setSources([]);
+      setPassword("");
+    } catch (caught) {
+      setSubmitError(normalizeAppError(caught));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) setSubmitError(undefined);
+      }}
+    >
+      <Dialog.Content maxWidth="560px">
+        <Dialog.Title>{t("addToArchive")}</Dialog.Title>
+        <Dialog.Description>{t("addToArchiveDescription")}</Dialog.Description>
+        <div className={styles.extractForm}>
+          <div className={styles.destinationRow}>
+            <Button type="button" variant="soft" onClick={chooseFiles}>
+              {t("chooseFiles")}
+            </Button>
+            <Button type="button" variant="soft" onClick={chooseFolder}>
+              {t("chooseFolder")}
+            </Button>
+          </div>
+          <strong>{t("selectedSources")}</strong>
+          {sources.length ? (
+            <ul>
+              {sources.map((source) => (
+                <li key={source}>{source}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className={styles.formHint}>{t("noSourcesSelected")}</p>
+          )}
+          {passwordRequired && (
+            <label>
+              {t("password")}
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+          )}
+          {submitError && (
+            <div className={styles.formError} role="alert">
+              <strong>{submitError.message}</strong>
+              {submitError.userAction && <span>{submitError.userAction}</span>}
+            </div>
+          )}
+        </div>
+        <Flex mt="5" gap="3" justify="end">
+          <Button
+            type="button"
+            variant="soft"
+            color="gray"
+            onClick={() => onOpenChange(false)}
+          >
+            {t("cancel")}
+          </Button>
+          <Button
+            type="button"
+            disabled={
+              !sources.length || submitting || (passwordRequired && !password)
+            }
+            aria-busy={submitting}
+            onClick={start}
+          >
+            {submitting ? t("startingAddition") : t("startAdding")}
+          </Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -1005,13 +1832,11 @@ function ExtractDialog({
   archive,
   selectedPath,
   onOpenChange,
-  onError,
 }: {
   open: boolean;
   archive: OpenArchiveResult;
   selectedPath?: string;
   onOpenChange: (open: boolean) => void;
-  onError: (error: AppErrorDto) => void;
 }) {
   const { t } = useI18n();
   const [destination, setDestination] = useState("");
@@ -1022,6 +1847,7 @@ function ExtractDialog({
   const [restorePermissions, setRestorePermissions] = useState(true);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<AppErrorDto>();
   const encrypted = archive.summary.encryptionMethods.some(
     (method) => method.toLowerCase() !== "none",
   );
@@ -1043,15 +1869,21 @@ function ExtractDialog({
   }, [open, selectedPath]);
 
   const chooseDestination = async () => {
-    const selected = await openDialog({
-      directory: true,
-      multiple: false,
-      title: t("chooseDestination"),
-    });
-    if (typeof selected === "string") setDestination(selected);
+    setSubmitError(undefined);
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: t("chooseDestination"),
+      });
+      if (typeof selected === "string") setDestination(selected);
+    } catch (caught) {
+      setSubmitError(normalizeAppError(caught));
+    }
   };
 
   const start = async () => {
+    setSubmitError(undefined);
     setSubmitting(true);
     try {
       await jobApi.startExtract({
@@ -1066,14 +1898,20 @@ function ExtractDialog({
       onOpenChange(false);
       setDestination("");
     } catch (caught) {
-      onError(normalizeAppError(caught));
+      setSubmitError(normalizeAppError(caught));
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) setSubmitError(undefined);
+      }}
+    >
       <Dialog.Content maxWidth="520px">
         <Dialog.Title>{t("extractArchive")}</Dialog.Title>
         <Dialog.Description>{t("extractDescription")}</Dialog.Description>
@@ -1146,6 +1984,12 @@ function ExtractDialog({
                 onChange={(event) => setPassword(event.target.value)}
               />
             </label>
+          )}
+          {submitError && (
+            <div className={styles.formError} role="alert">
+              <strong>{submitError.message}</strong>
+              {submitError.userAction && <span>{submitError.userAction}</span>}
+            </div>
           )}
           <p id="extract-readiness" className={styles.extractReadiness}>
             {readiness}
