@@ -1,315 +1,501 @@
 "use client";
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+
+import { useEffect, useMemo, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { readAllIfDir } from "../utils/fs";
-import {
-  CubeIcon,
-  Cross1Icon,
-  FileIcon,
-  GearIcon,
-} from "@radix-ui/react-icons";
-import ProcessingIcon from "../components/ProcessingIcon";
+import { ArchiveIcon, Cross1Icon, FileIcon } from "@radix-ui/react-icons";
+import { Button } from "@radix-ui/themes";
+import { TranslationKey, useI18n } from "../features/i18n";
+import { jobApi } from "../features/jobs/api";
 import styles from "./Create.module.css";
-import Uncontrolable from "../components/Uncontrolable";
-import { useI18n } from "../features/i18n";
-import {
-  Button,
-  Flex,
-  IconButton,
-  Select,
-  TextField,
-  Dialog,
-  Text,
-  Spinner,
-  Checkbox,
-} from "@radix-ui/themes";
 
-const EVENT_ON_FINISH = "on_finish";
-const EVENT_ON_ENTRY_START = "on_entry_start";
-
-const COMPRESSION = ["none", "zlib", "zstd", "xz"] as const;
+const COMPRESSION = ["store", "deflate", "zstd", "xz"] as const;
 type Compression = (typeof COMPRESSION)[number];
-
 const ENCRYPTION = ["none", "aes", "camellia"] as const;
 type Encryption = (typeof ENCRYPTION)[number];
+type Preset =
+  | "standard"
+  | "backup"
+  | "distribution"
+  | "maximum"
+  | "fast"
+  | "reproducible";
+type PresetSelection = Preset | "custom";
+
+interface Settings {
+  compression: Compression;
+  encryption: Encryption;
+  solid: boolean;
+  preservePermissions: boolean;
+  reproducible: boolean;
+}
+
+const PRESETS: Record<Preset, Settings> = {
+  standard: {
+    compression: "zstd",
+    encryption: "none",
+    solid: false,
+    preservePermissions: true,
+    reproducible: false,
+  },
+  backup: {
+    compression: "zstd",
+    encryption: "none",
+    solid: false,
+    preservePermissions: true,
+    reproducible: false,
+  },
+  distribution: {
+    compression: "zstd",
+    encryption: "none",
+    solid: false,
+    preservePermissions: false,
+    reproducible: false,
+  },
+  maximum: {
+    compression: "xz",
+    encryption: "none",
+    solid: true,
+    preservePermissions: true,
+    reproducible: false,
+  },
+  fast: {
+    compression: "store",
+    encryption: "none",
+    solid: false,
+    preservePermissions: true,
+    reproducible: false,
+  },
+  reproducible: {
+    compression: "zstd",
+    encryption: "none",
+    solid: false,
+    preservePermissions: false,
+    reproducible: true,
+  },
+};
 
 export default function Create() {
   const { t } = useI18n();
-  const [appWindow, setAppWindow] = useState<WebviewWindow>();
-  const [openSettings, setOpenSettings] = useState(false);
-  const [files, setFiles] = useState<string[]>([]);
-  const [processingEntry, setProcessingEntry] = useState("");
-  const [processing, setProcessing] = useState(false);
-  const [compression, setCompression] = useState<Compression>("zstd");
-  const [encryption, setEncryption] = useState<Encryption>("none");
-  const [password, setPassword] = useState<string>("");
-  const [solidMode, setSolidMode] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [sources, setSources] = useState<string[]>([]);
+  const [configuration, setConfiguration] = useState<{
+    preset: PresetSelection;
+    settings: Settings;
+  }>({ preset: "standard", settings: PRESETS.standard });
+  const { preset, settings } = configuration;
+  const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [overwrite, setOverwrite] = useState(false);
   const [draggingOver, setDraggingOver] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string>();
+  const [queuedJob, setQueuedJob] = useState<string>();
+  const addSources = (paths: string[]) => {
+    setSources((current) => [...new Set([...current, ...paths])]);
+  };
 
-  const addFiles = async (paths: string[]) => {
-    const files: string[] = [];
-    for (const path of paths) {
-      files.push(...(await readAllIfDir(path)));
+  const chooseFiles = async () => {
+    const selected = await open({ multiple: true });
+    if (selected) addSources([selected].flat());
+  };
+
+  const chooseFolder = async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected === "string") addSources([selected]);
+  };
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void import("@tauri-apps/api/webviewWindow").then(
+      async ({ getCurrentWebviewWindow }) => {
+        if (disposed) return;
+        unlisten = await getCurrentWebviewWindow().onDragDropEvent((event) => {
+          if (event.payload.type === "enter" || event.payload.type === "over")
+            setDraggingOver(true);
+          if (event.payload.type === "leave") setDraggingOver(false);
+          if (event.payload.type === "drop") {
+            setDraggingOver(false);
+            addSources(event.payload.paths);
+          }
+        });
+      },
+    );
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const validation = useMemo(() => {
+    if (settings.reproducible && settings.encryption !== "none")
+      return t("reproducibleEncryptionConflict");
+    if (settings.encryption !== "none" && !password) return t("passwordNeeded");
+    if (settings.encryption !== "none" && password !== passwordConfirmation)
+      return t("passwordMismatch");
+    return undefined;
+  }, [password, passwordConfirmation, settings, t]);
+
+  const applyPreset = (next: Preset) => {
+    setConfiguration({ preset: next, settings: PRESETS[next] });
+    if (next === "reproducible") {
+      setPassword("");
+      setPasswordConfirmation("");
     }
-    setFiles((current) => [...current, ...files]);
   };
 
-  const openFilePicker = async () => {
-    if (processing) return;
-    const files = await open({ multiple: true });
-    if (files === null) return;
-    await addFiles([files].flat());
-  };
-
-  const create = async () => {
-    if (encryption !== "none" && password.length === 0) {
-      window.alert(t("passwordNeeded"));
+  const start = async () => {
+    if (validation) {
+      setError(validation);
       return;
     }
-
-    const filePath = await save({
+    const selected = await save({
       title: t("saveArchive"),
       defaultPath: "archive.pna",
       filters: [{ name: "PNA Archive", extensions: ["pna"] }],
     });
-    if (filePath === null) return;
-
-    const finalPath = filePath.endsWith(".pna") ? filePath : filePath + ".pna";
-    const lastSep = Math.max(
-      finalPath.lastIndexOf("/"),
-      finalPath.lastIndexOf("\\"),
-    );
-    const saveDir = lastSep >= 0 ? finalPath.substring(0, lastSep) : ".";
-    const archiveName = finalPath.substring(lastSep + 1);
-
-    setProcessing(true);
-    invoke("create", {
-      archiveFinishEvent: EVENT_ON_FINISH,
-      entryStartEvent: EVENT_ON_ENTRY_START,
-      name: archiveName,
-      files,
-      saveDir,
-      option: {
-        solid: solidMode,
-        compression,
-        encryption,
-        password: password.length === 0 ? null : password,
-      },
-    })
-      .then(() => setProcessing(false))
-      .catch((err) => {
-        window.alert(err);
-        setProcessing(false);
+    if (!selected) return;
+    const outputPath = selected.toLowerCase().endsWith(".pna")
+      ? selected
+      : `${selected}.pna`;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await jobApi.startCreate({
+        sources,
+        outputPath,
+        overwrite,
+        options: {
+          solid: settings.solid,
+          compression: settings.compression,
+          encryption: settings.encryption,
+          password: settings.encryption === "none" ? null : password,
+          preservePermissions: settings.preservePermissions,
+          reproducible: settings.reproducible,
+        },
       });
+      setQueuedJob(outputPath);
+      setSources([]);
+      setStep(1);
+    } catch (caught) {
+      setError(String(caught));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  useEffect(() => {
-    import("@tauri-apps/api/webviewWindow").then((it) => {
-      setAppWindow(it.getCurrentWebviewWindow());
-    });
-  }, []);
-
-  useEffect(() => {
-    const unlisten = appWindow?.onDragDropEvent((e) => {
-      if (e.payload.type === "over") {
-        setDraggingOver(true);
-      } else if (e.payload.type === "leave" || e.payload.type === "drop") {
-        setDraggingOver(false);
-      }
-      if (e.payload.type === "drop") {
-        addFiles(e.payload.paths);
-      }
-    });
-    return () => {
-      unlisten?.then((it) => it());
-    };
-  }, [appWindow]);
-
-  useEffect(() => {
-    const unlisten = appWindow?.listen<string>(EVENT_ON_ENTRY_START, (e) => {
-      setProcessingEntry(e.payload);
-    });
-    return () => {
-      unlisten?.then((it) => it());
-    };
-  }, [appWindow]);
-
-  useEffect(() => {
-    const unlisten = appWindow?.listen<string>(EVENT_ON_FINISH, () => {
-      setFiles([]);
-    });
-    return () => {
-      unlisten?.then((it) => it());
-    };
-  }, [appWindow]);
-
   return (
-    <div className={styles.root}>
-      <div
-        className={`${styles.fileArea} ${draggingOver ? styles.dragOver : ""}`}
-      >
-        {files.length === 0 ? (
-          <div className={styles.fileAreaEmpty} onClick={openFilePicker}>
-            <CubeIcon
-              width={32}
-              height={32}
-              style={{
-                color: draggingOver ? "var(--accent-a8)" : "var(--gray-a6)",
-                transform: draggingOver ? "scale(1.08)" : "scale(1)",
-                transition: "transform 0.2s ease, color 0.2s ease",
-              }}
-            />
-            <span className={styles.fileAreaHint}>{t("dropFiles")}</span>
-            <span className={styles.fileAreaSubHint}>{t("browseFiles")}</span>
-          </div>
-        ) : (
-          <>
-            <div className={styles.dropPrompt} onClick={openFilePicker}>
-              <span className={styles.dropPromptText}>{t("addMoreFiles")}</span>
-            </div>
-            <div className={styles.fileList}>
-              {files.map((it) => (
-                <div key={it} className={styles.fileItem}>
-                  <span className={styles.fileItemIcon}>
-                    {processing && it === processingEntry ? (
-                      <ProcessingIcon />
-                    ) : (
-                      <FileIcon width={12} height={12} />
-                    )}
-                  </span>
-                  <span
-                    className={`${styles.fileItemName} ${
-                      processing && it === processingEntry
-                        ? styles.fileItemProcessing
-                        : ""
-                    }`}
-                  >
-                    {it}
-                  </span>
-                  {!processing && (
-                    <button
-                      className={styles.fileItemRemove}
-                      aria-label={`${t("removeFile")}: ${it}`}
-                      onClick={() =>
-                        setFiles((current) => current.filter((f) => f !== it))
-                      }
-                    >
-                      <Cross1Icon width={10} height={10} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-
-      <div className={styles.actionBar}>
-        <Dialog.Root open={openSettings}>
-          <Dialog.Trigger>
-            <IconButton
-              variant="soft"
-              color="gray"
-              size="2"
-              className={styles.gearButton}
-              aria-label={t("archiveOptions")}
-              onClick={() => setOpenSettings(true)}
-              disabled={processing}
+    <section className={styles.wizard} aria-label={t("createWizard")}>
+      <ol className={styles.steps} aria-label={t("createSteps")}>
+        {[t("selectSources"), t("settings"), t("confirmation")].map(
+          (label, index) => (
+            <li
+              key={label}
+              data-active={step === index + 1}
+              data-complete={step > index + 1}
+              aria-current={step === index + 1 ? "step" : undefined}
             >
-              <GearIcon />
-            </IconButton>
-          </Dialog.Trigger>
-          <Dialog.Content maxWidth="380px">
-            <Dialog.Title>{t("archiveOptions")}</Dialog.Title>
-            <Dialog.Description size="2" color="gray">
-              {t("currentCreateFeature")}
-            </Dialog.Description>
-            <Flex direction="column" gap="3" mt="2">
-              <Flex direction="column" gap="1">
-                <Text size="2" weight="medium">
-                  {t("compression")}
-                </Text>
-                <Select.Root
-                  defaultValue={compression}
-                  onValueChange={(e) => setCompression(e as Compression)}
-                >
-                  <Select.Trigger aria-label={t("compression")} />
-                  <Select.Content>
-                    {COMPRESSION.map((it) => (
-                      <Select.Item key={it} value={it}>
-                        {it === "none" ? t("none") : it}
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Root>
-              </Flex>
-              <Flex direction="column" gap="1">
-                <Text size="2" weight="medium">
-                  {t("encryption")}
-                </Text>
-                <Select.Root
-                  defaultValue={encryption}
-                  onValueChange={(e) => setEncryption(e as Encryption)}
-                >
-                  <Select.Trigger aria-label={t("encryption")} />
-                  <Select.Content>
-                    {ENCRYPTION.map((it) => (
-                      <Select.Item key={it} value={it}>
-                        {it === "none" ? t("none") : it}
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Root>
-              </Flex>
-              <Flex direction="column" gap="1">
-                <Text size="2" weight="medium">
-                  {t("password")}
-                </Text>
-                <TextField.Root
-                  type="password"
-                  aria-label={t("password")}
-                  size="2"
-                  disabled={encryption === "none"}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </Flex>
-              <Text as="label" size="2">
-                <Flex gap="2" align="center">
-                  <Checkbox
-                    defaultChecked={solidMode}
-                    onCheckedChange={(state) => {
-                      if (state === "indeterminate") return;
-                      setSolidMode(state);
-                    }}
-                  />
-                  {t("solidMode")}
-                </Flex>
-              </Text>
-            </Flex>
-            <Flex mt="4" justify="end">
-              <Dialog.Close>
-                <Button onClick={() => setOpenSettings(false)}>
-                  {t("done")}
-                </Button>
-              </Dialog.Close>
-            </Flex>
-          </Dialog.Content>
-        </Dialog.Root>
-        <Button
-          size="2"
-          onClick={create}
-          disabled={files.length === 0 || processing}
-        >
-          <Spinner loading={processing}>
-            <CubeIcon />
-          </Spinner>
-          {t("createArchive")}
-        </Button>
-      </div>
+              <span>{index + 1}</span>
+              {label}
+            </li>
+          ),
+        )}
+      </ol>
 
-      {processing && <Uncontrolable />}
-    </div>
+      {queuedJob && (
+        <div className={styles.notice} role="status">
+          <span>
+            <strong>{t("creationStarted")}</strong>
+            {t("creationStartedHint").replace("{path}", queuedJob)}
+          </span>
+          <button
+            type="button"
+            aria-label={t("dismissCreationNotice")}
+            onClick={() => setQueuedJob(undefined)}
+          >
+            <Cross1Icon aria-hidden="true" />
+          </button>
+        </div>
+      )}
+      {error && (
+        <div className={styles.error} role="alert">
+          {error}
+        </div>
+      )}
+
+      {step === 1 && (
+        <div className={styles.panel}>
+          <button
+            type="button"
+            className={`${styles.dropZone} ${draggingOver ? styles.dragOver : ""}`}
+            onClick={chooseFiles}
+            aria-label={`${t("dropFiles")} ${t("browseFiles")}`}
+          >
+            <ArchiveIcon width={28} height={28} aria-hidden="true" />
+            <strong>{t("dropFiles")}</strong>
+            <span>{t("browseFiles")}</span>
+          </button>
+          <div className={styles.sourceActions}>
+            <Button variant="soft" onClick={chooseFiles}>
+              {t("addFiles")}
+            </Button>
+            <Button variant="soft" onClick={chooseFolder}>
+              {t("addFolder")}
+            </Button>
+          </div>
+          {sources.length === 0 ? (
+            <p className={styles.empty}>{t("noSources")}</p>
+          ) : (
+            <ul className={styles.sources}>
+              {sources.map((source) => (
+                <li key={source}>
+                  <FileIcon aria-hidden="true" />
+                  <span>{source}</span>
+                  <button
+                    type="button"
+                    aria-label={`${t("removeFile")}: ${source}`}
+                    onClick={() =>
+                      setSources((current) =>
+                        current.filter((value) => value !== source),
+                      )
+                    }
+                  >
+                    <Cross1Icon aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className={styles.panel}>
+          <p>{t("chooseCreateSettings")}</p>
+          <div className={styles.presets}>
+            {(
+              [
+                "standard",
+                "backup",
+                "distribution",
+                "maximum",
+                "fast",
+                "reproducible",
+              ] as Preset[]
+            ).map((value) => (
+              <button
+                type="button"
+                key={value}
+                data-selected={preset === value}
+                onClick={() => applyPreset(value)}
+              >
+                <strong>{t(`preset_${value}` as TranslationKey)}</strong>
+                <small>
+                  {t(`preset_${value}_description` as TranslationKey)}
+                </small>
+              </button>
+            ))}
+          </div>
+          <div className={styles.settingsGrid}>
+            <label>
+              {t("compression")}
+              <select
+                aria-label={t("compression")}
+                value={settings.compression}
+                onChange={(event) => {
+                  const compression = event.target.value as Compression;
+                  setConfiguration((current) => ({
+                    preset: "custom",
+                    settings: { ...current.settings, compression },
+                  }));
+                }}
+              >
+                {COMPRESSION.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("encryption")}
+              <select
+                aria-label={t("encryption")}
+                value={settings.encryption}
+                onChange={(event) => {
+                  const value = event.target.value as Encryption;
+                  setConfiguration((current) => ({
+                    preset: "custom",
+                    settings: {
+                      ...current.settings,
+                      encryption: value,
+                      reproducible:
+                        value === "none"
+                          ? current.settings.reproducible
+                          : false,
+                    },
+                  }));
+                }}
+              >
+                {ENCRYPTION.map((value) => (
+                  <option key={value} value={value}>
+                    {value === "none" ? t("none") : value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {settings.encryption !== "none" && (
+              <>
+                <label>
+                  {t("password")}
+                  <input
+                    type="password"
+                    aria-label={t("password")}
+                    name="archive-password"
+                    autoComplete="new-password"
+                    aria-invalid={Boolean(validation)}
+                    aria-describedby={
+                      validation ? "create-validation" : undefined
+                    }
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                  />
+                </label>
+                <label>
+                  {t("confirmPassword")}
+                  <input
+                    type="password"
+                    aria-label={t("confirmPassword")}
+                    name="archive-password-confirmation"
+                    autoComplete="new-password"
+                    aria-invalid={Boolean(validation)}
+                    aria-describedby={
+                      validation ? "create-validation" : undefined
+                    }
+                    value={passwordConfirmation}
+                    onChange={(event) =>
+                      setPasswordConfirmation(event.target.value)
+                    }
+                  />
+                </label>
+              </>
+            )}
+            <label className={styles.check}>
+              <input
+                type="checkbox"
+                checked={settings.solid}
+                onChange={(event) => {
+                  const solid = event.target.checked;
+                  setConfiguration((current) => ({
+                    preset: "custom",
+                    settings: { ...current.settings, solid },
+                  }));
+                }}
+              />
+              {t("solidMode")}
+            </label>
+            <label className={styles.check}>
+              <input
+                type="checkbox"
+                checked={settings.preservePermissions}
+                onChange={(event) => {
+                  const preservePermissions = event.target.checked;
+                  setConfiguration((current) => ({
+                    preset: "custom",
+                    settings: { ...current.settings, preservePermissions },
+                  }));
+                }}
+              />
+              {t("preservePermissions")}
+            </label>
+          </div>
+          {validation && (
+            <p
+              id="create-validation"
+              className={styles.validation}
+              role="alert"
+            >
+              {validation}
+            </p>
+          )}
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className={styles.panel}>
+          <h2>{t("reviewCreate")}</h2>
+          <dl className={styles.review}>
+            <div>
+              <dt>{t("items")}</dt>
+              <dd>{sources.length}</dd>
+            </div>
+            <div>
+              <dt>{t("preset")}</dt>
+              <dd>{t(`preset_${preset}` as TranslationKey)}</dd>
+            </div>
+            <div>
+              <dt>{t("compression")}</dt>
+              <dd>{settings.compression}</dd>
+            </div>
+            <div>
+              <dt>{t("encryption")}</dt>
+              <dd>
+                {settings.encryption === "none"
+                  ? t("none")
+                  : settings.encryption}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("configuration")}</dt>
+              <dd>{settings.solid ? "Solid" : "Normal"}</dd>
+            </div>
+          </dl>
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={overwrite}
+              onChange={(event) => setOverwrite(event.target.checked)}
+            />
+            {t("allowOverwrite")}
+          </label>
+          <p className={styles.hint}>{t("estimatedNotGuaranteed")}</p>
+          {validation && (
+            <p
+              id="create-validation"
+              className={styles.validation}
+              role="alert"
+            >
+              {validation}
+            </p>
+          )}
+        </div>
+      )}
+
+      <footer className={styles.wizardActions}>
+        {step > 1 && (
+          <Button variant="soft" onClick={() => setStep((step - 1) as 1 | 2)}>
+            {t("back")}
+          </Button>
+        )}
+        <span />
+        {step < 3 ? (
+          <Button
+            disabled={step === 1 && sources.length === 0}
+            onClick={() => setStep((step + 1) as 2 | 3)}
+          >
+            {t("next")}
+          </Button>
+        ) : (
+          <Button
+            disabled={submitting || Boolean(validation)}
+            aria-busy={submitting}
+            aria-describedby={validation ? "create-validation" : undefined}
+            onClick={start}
+          >
+            {submitting ? t("startingCreation") : t("startCreating")}
+          </Button>
+        )}
+      </footer>
+    </section>
   );
 }

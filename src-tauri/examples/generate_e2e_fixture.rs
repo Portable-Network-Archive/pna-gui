@@ -1,6 +1,7 @@
 use std::{env, fs, io::Write, path::PathBuf};
 
-use libpna::{Archive, Encryption, EntryBuilder, EntryName, WriteOptions};
+use libpna::{Archive, ChunkType, Encryption, EntryBuilder, EntryName, RawChunk, WriteOptions};
+use sha2::{Digest, Sha256};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = env::args_os()
@@ -26,6 +27,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build();
         let mut entry = EntryBuilder::new_file(EntryName::from(path), options)?;
         entry.write_all(content.as_bytes())?;
+        entry.add_extra_chunk(RawChunk::from_data(
+            ChunkType::private(*b"phSh")?,
+            Sha256::digest(content.as_bytes()).to_vec(),
+        ));
         archive.add_entry(entry.build()?)?;
     }
     archive.finalize()?;

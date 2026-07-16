@@ -1,5 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod jobs;
+mod operations;
 mod reader;
 mod utils;
 
@@ -13,8 +15,94 @@ use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{MenuBuilder, MenuItem, SubmenuBuilder},
-    Emitter, Manager, Window,
+    AppHandle, Emitter, Manager, State, Window,
 };
+
+fn job_observer(app: AppHandle) -> std::sync::Arc<dyn Fn(jobs::JobSnapshot) + Send + Sync> {
+    std::sync::Arc::new(move |snapshot| {
+        if snapshot.kind == jobs::JobKind::Create && snapshot.status == jobs::JobStatus::Succeeded {
+            if let Some(output_path) = snapshot.output_path.as_deref() {
+                let state = app.state::<reader::ReaderState>();
+                if let Err(error) = state
+                    .remember_created(Path::new(output_path), snapshot.completed_units as usize)
+                {
+                    eprintln!("failed to add created archive to Recents: {error:?}");
+                }
+            }
+        }
+        if let Err(error) = app.emit("job-update", snapshot) {
+            eprintln!("failed to emit job-update event: {error}");
+        }
+    })
+}
+
+#[tauri::command]
+fn job_start_create(
+    app: AppHandle,
+    jobs: State<'_, jobs::JobManager>,
+    request: operations::CreateRequest,
+) -> Result<jobs::JobSnapshot, String> {
+    jobs.start(jobs::JobRequest::Create(request), job_observer(app))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn job_start_extract(
+    app: AppHandle,
+    jobs: State<'_, jobs::JobManager>,
+    request: operations::ExtractRequest,
+) -> Result<jobs::JobSnapshot, String> {
+    jobs.start(jobs::JobRequest::Extract(request), job_observer(app))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn job_list(jobs: State<'_, jobs::JobManager>) -> Vec<jobs::JobSnapshot> {
+    jobs.list()
+}
+
+#[tauri::command]
+fn job_cancel(
+    jobs: State<'_, jobs::JobManager>,
+    job_id: String,
+) -> Result<jobs::JobSnapshot, String> {
+    jobs.cancel(&job_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn job_retry(
+    app: AppHandle,
+    jobs: State<'_, jobs::JobManager>,
+    job_id: String,
+) -> Result<jobs::JobSnapshot, String> {
+    jobs.retry(&job_id, job_observer(app))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn job_dismiss(
+    jobs: State<'_, jobs::JobManager>,
+    job_id: String,
+) -> Result<Vec<jobs::JobSnapshot>, String> {
+    jobs.dismiss(&job_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn job_reveal_output(jobs: State<'_, jobs::JobManager>, job_id: String) -> Result<(), String> {
+    let output = std::path::PathBuf::from(
+        jobs.output_path(&job_id)
+            .map_err(|error| error.to_string())?,
+    );
+    let folder = if output.is_dir() {
+        output
+    } else {
+        output
+            .parent()
+            .ok_or_else(|| "job output has no parent folder".to_string())?
+            .to_path_buf()
+    };
+    open::that(folder).map_err(|error| error.to_string())
+}
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
@@ -301,7 +389,29 @@ fn safe_relative_entry_path(name: &Path) -> io::Result<PathBuf> {
     let mut relative = PathBuf::new();
     for component in name.components() {
         match component {
-            Component::Normal(value) => relative.push(value),
+            Component::Normal(value) => {
+                let component = value.to_string_lossy();
+                let stem = component
+                    .split('.')
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_uppercase();
+                let numbered_reserved = |prefix: &str| {
+                    stem.strip_prefix(prefix)
+                        .and_then(|suffix| suffix.parse::<u8>().ok())
+                        .is_some_and(|number| (1..=9).contains(&number))
+                };
+                let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+                    || numbered_reserved("COM")
+                    || numbered_reserved("LPT");
+                if reserved || component.ends_with(['.', ' ']) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "archive entry uses a reserved file name",
+                    ));
+                }
+                relative.push(value)
+            }
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -408,6 +518,7 @@ pub fn run() {
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             app.manage(reader::ReaderState::new(app_data_dir.join("recent.json")));
+            app.manage(jobs::JobManager::default());
 
             // --- Window Menu Bar (matching v1 Menu::os_default layout) ---
             let update_check = MenuItem::with_id(
@@ -560,6 +671,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             create,
             extract,
+            job_start_create,
+            job_start_extract,
+            job_list,
+            job_cancel,
+            job_retry,
+            job_dismiss,
+            job_reveal_output,
             reader::app_bootstrap,
             reader::recent_remove,
             reader::archive_open,
@@ -834,6 +952,9 @@ mod tests {
             ("BE-SEC-EXTRACT-ABSOLUTE", "/tmp/escape.txt"),
             ("BE-SEC-EXTRACT-WINDOWS-DRIVE", "C:/escape.txt"),
             ("BE-SEC-EXTRACT-WINDOWS-SEPARATOR", "dir\\escape.txt"),
+            ("BE-P2-SEC-EXTRACT-RESERVED-CON", "CON.txt"),
+            ("BE-P2-SEC-EXTRACT-RESERVED-COM", "folder/COM1.log"),
+            ("BE-P2-SEC-EXTRACT-TRAILING-DOT", "folder/name."),
             ("BE-SEC-EXTRACT-EMPTY", ""),
         ] {
             assert!(

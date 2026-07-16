@@ -1,13 +1,16 @@
 use std::{fs, io, path::Path};
 
-use libpna::{Archive, Encryption};
+use libpna::{Archive, Encryption, ReadEntry};
 
 pub(crate) fn is_encrypted<P: AsRef<Path>>(path: P) -> io::Result<bool> {
     let file = fs::File::open(path)?;
     let mut archive = Archive::read_header(file)?;
-    for entry in archive.entries().skip_solid() {
-        let entry = entry?;
-        match entry.header().encryption() {
+    for entry in archive.entries() {
+        let encryption = match entry? {
+            ReadEntry::Normal(entry) => entry.encryption(),
+            ReadEntry::Solid(entry) => entry.encryption(),
+        };
+        match encryption {
             Encryption::No => (),
             Encryption::Aes
             | Encryption::Camellia
