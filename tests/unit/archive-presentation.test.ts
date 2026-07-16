@@ -96,6 +96,11 @@ describe("archive presentation", () => {
       "The password is incorrect or the encrypted data could not be read.",
     ],
     [
+      "UI-ERROR-ENCRYPTED-UNVERIFIABLE",
+      "ENCRYPTED_DATA_UNVERIFIABLE",
+      "This archive does not contain the integrity information needed to verify encrypted uncompressed data safely.",
+    ],
+    [
       "UI-ERROR-NOT-FOUND",
       "PATH_NOT_FOUND",
       "The selected archive or item could not be found.",

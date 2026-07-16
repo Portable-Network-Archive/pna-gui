@@ -10,8 +10,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use libpna::{Archive, Compression, DataKind, Encryption, ReadEntry, ReadOptions};
+use libpna::{Archive, Chunk, Compression, DataKind, Encryption, ReadEntry, ReadOptions};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::State;
 
 const DEFAULT_PAGE_SIZE: usize = 200;
@@ -586,13 +587,44 @@ fn validate_entry_password(
     entry: &libpna::NormalEntry,
     password: Option<&str>,
 ) -> Result<(), AppErrorDto> {
+    let digest_type = libpna::ChunkType::private(crate::operations::PLAINTEXT_DIGEST_CHUNK_BYTES)
+        .expect("the PNA GUI digest chunk type is valid");
+    let expected_digest = entry
+        .extra_chunks()
+        .iter()
+        .find(|chunk| chunk.ty() == digest_type)
+        .map(|chunk| chunk.data());
+    if expected_digest.is_none() && entry.header().compression() == Compression::No {
+        // Store encryption has no decompressor failure that can distinguish a
+        // correct password from plausible garbage. Refuse plaintext unless an
+        // integrity digest makes password verification deterministic.
+        return Err(AppErrorDto::new(
+            "ENCRYPTED_DATA_UNVERIFIABLE",
+            "This encrypted entry has no integrity information, so its contents cannot be verified safely.",
+            false,
+        )
+        .with_action("Recreate the archive with integrity metadata before opening its contents."));
+    }
     let mut reader = entry
         .reader(ReadOptions::with_password(password))
         .map_err(|error| map_archive_error(error, true))?;
-    let mut byte = [0u8; 1];
-    reader
-        .read(&mut byte)
-        .map_err(|error| map_archive_error(error, true))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| map_archive_error(error, true))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    if expected_digest.is_some_and(|expected| digest.finalize().as_slice() != expected) {
+        return Err(map_archive_error(
+            io::Error::new(io::ErrorKind::InvalidData, "plaintext digest mismatch"),
+            true,
+        ));
+    }
     Ok(())
 }
 
@@ -905,6 +937,8 @@ fn is_text_preview(name: &str) -> bool {
             | "tsx"
             | "js"
             | "jsx"
+            | "mjs"
+            | "cjs"
             | "css"
             | "html"
             | "htm"
@@ -920,6 +954,7 @@ mod tests {
     use std::process::Command;
 
     use libpna::{EntryBuilder, EntryName, WriteOptions};
+    use sha2::Digest;
     use tempfile::tempdir;
 
     #[test]
@@ -1047,6 +1082,67 @@ mod tests {
         assert_eq!(preview.text.as_deref(), Some("hello from pna"));
         assert!(!preview.truncated);
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn encrypted_stored_entry_rejects_wrong_password_before_indexing() {
+        // BE-OPEN-NORMAL-WRONG-PASSWORD-INTEGRITY
+        let path = test_archive_path("encrypted-stored-integrity");
+        let plaintext = b"authenticated preview text";
+        let file = fs::File::create(&path).unwrap();
+        let mut archive = Archive::write_header(file).unwrap();
+        let options = WriteOptions::builder()
+            .encryption(Encryption::Aes)
+            .password(Some("secret"))
+            .build();
+        let mut entry =
+            EntryBuilder::new_file(EntryName::from("docs/readme.txt"), options).unwrap();
+        entry.write_all(plaintext).unwrap();
+        entry.add_extra_chunk(libpna::RawChunk::from_data(
+            libpna::ChunkType::private(crate::operations::PLAINTEXT_DIGEST_CHUNK_BYTES).unwrap(),
+            sha2::Sha256::digest(plaintext).to_vec(),
+        ));
+        archive.add_entry(entry.build().unwrap()).unwrap();
+        archive.finalize().unwrap();
+
+        assert_eq!(
+            build_index("wrong-password", &path, Some("wrong"))
+                .unwrap_err()
+                .code,
+            "WRONG_PASSWORD"
+        );
+        assert!(build_index("correct-password", &path, Some("secret")).is_ok());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn encrypted_stored_entry_without_integrity_is_not_mislabeled_as_wrong_password() {
+        // BE-OPEN-ENCRYPTED-STORE-UNVERIFIABLE
+        let path = test_archive_path("encrypted-stored-without-integrity");
+        let file = fs::File::create(&path).unwrap();
+        let mut archive = Archive::write_header(file).unwrap();
+        let options = WriteOptions::builder()
+            .encryption(Encryption::Aes)
+            .password(Some("correct"))
+            .build();
+        let mut entry = EntryBuilder::new_file(EntryName::from("legacy.txt"), options).unwrap();
+        entry.write_all(b"legacy plaintext").unwrap();
+        archive.add_entry(entry.build().unwrap()).unwrap();
+        archive.finalize().unwrap();
+
+        let error = build_index("legacy", &path, Some("correct")).unwrap_err();
+        assert_eq!(error.code, "ENCRYPTED_DATA_UNVERIFIABLE");
+        assert!(!error.retryable);
+        assert!(error.message.contains("integrity"));
+        assert!(!error.message.contains("password is incorrect"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn safe_text_preview_includes_module_source_files() {
+        // BE-PREVIEW-MODULE-SOURCE
+        assert!(is_text_preview("module.mjs"));
+        assert!(is_text_preview("module.cjs"));
     }
 
     #[test]

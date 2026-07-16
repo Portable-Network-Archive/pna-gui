@@ -39,6 +39,25 @@ describe("shipped feature boundaries", () => {
     expect(operations).not.toMatch(/pub destination: Option<PathBuf>/);
   });
 
+  it("registers every shipped archive update and normalization command", () => {
+    // ARCH-UPDATE-IPC-REGISTERED
+    const backend = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
+    for (const command of [
+      "job_start_append",
+      "job_start_delete_entries",
+      "job_start_rename_entry",
+      "job_start_split",
+      "job_start_concat",
+      "job_start_sort",
+      "job_start_strip_metadata",
+      "job_start_migrate",
+    ]) {
+      expect(backend).toMatch(
+        new RegExp(`generate_handler!\\[[\\s\\S]*\\b${command},?`),
+      );
+    }
+  });
+
   it("preserves the five-platform CI architecture", () => {
     // ARCH-CI-FIVE-PLATFORMS, ARCH-CI-RUST-FRONTEND-ASSET
     const workflow = readFileSync(
@@ -207,5 +226,27 @@ describe("shipped feature boundaries", () => {
     const backend = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
     expect(backend).toContain("failed to emit job-update event");
     expect(backend).not.toContain('let _ = app.emit("job-update"');
+  });
+
+  it("keeps archive commands compact and named at narrow desktop widths", () => {
+    // UI-UX-RESPONSIVE-TOOLBAR
+    const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+    const css = readFileSync(resolve(root, "src/App.module.css"), "utf8");
+    for (const command of [
+      "openAnotherArchive",
+      "addFilesToArchive",
+      "extract",
+      "more",
+    ]) {
+      expect(app).toMatch(
+        new RegExp(
+          `aria-label=\\{t\\("${command}"\\)\\}[\\s\\S]{0,240}toolbarLabel`,
+        ),
+      );
+    }
+    expect(css).toMatch(/\.toolbarButton\s*\{[^}]*white-space:\s*nowrap/s);
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*900px\)[\s\S]*\.toolbarLabel\s*\{[^}]*display:\s*none/s,
+    );
   });
 });

@@ -98,8 +98,13 @@
   color: #263244;
   font: inherit;
   font-size: 13px;
+  white-space: nowrap;
   background: transparent;
   cursor: pointer;
+}
+
+.toolbarButton svg {
+  flex: 0 0 auto;
 }
 
 .toolbarButton:hover {
@@ -1129,6 +1134,15 @@
     display: none;
   }
 
+  .toolbarLabel {
+    display: none;
+  }
+
+  .toolbarButton {
+    width: 36px;
+    padding: 0;
+  }
+
   .listPanel .table th:nth-child(n + 5),
   .listPanel .table td:nth-child(n + 5) {
     display: none;
@@ -1216,6 +1230,34 @@
   padding-top: 10px;
   border-top: 1px solid var(--app-border);
   color: #344054;
+}
+
+.formError {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid #e5a8a8;
+  border-radius: 6px;
+  color: #8f1d1d;
+  font-size: 11px;
+  line-height: 1.45;
+  background: #fff7f7;
+}
+
+.formError span {
+  color: #6f2b2b;
+}
+
+.fieldError {
+  color: #9b1c1c;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.extractForm input[aria-invalid="true"] {
+  border-color: #c94a4a;
 }
 
 .extractForm input:focus-visible,

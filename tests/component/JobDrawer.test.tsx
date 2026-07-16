@@ -162,6 +162,78 @@ describe("background job drawer", () => {
     expect(onOpenArchive).toHaveBeenCalledWith("/output/archive.pna");
   });
 
+  it("[UI-VOLUME-SPLIT-RESULT-ACTION] reveals split parts without opening an incomplete part", async () => {
+    const splitResult: JobSnapshot = {
+      ...completed,
+      kind: "split",
+      outputPath: "/output/archive.part1.pna",
+    };
+    const onOpenArchive = vi.fn();
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") return [splitResult];
+      return splitResult;
+    });
+
+    render(
+      <I18nProvider>
+        <JobDrawer onOpenArchive={onOpenArchive} />
+      </I18nProvider>,
+    );
+
+    const bar = await screen.findByRole("region", { name: "Background jobs" });
+    expect(
+      within(bar).getByRole("button", { name: "Show in Folder" }),
+    ).toBeVisible();
+    expect(
+      within(bar).queryByRole("button", { name: "Open Output Archive" }),
+    ).not.toBeInTheDocument();
+    expect(onOpenArchive).not.toHaveBeenCalled();
+  });
+
+  it("[UI-UX-JOB-RECOVERABLE-CONFLICT] localizes an output collision and keeps its file discoverable", async () => {
+    Object.defineProperty(navigator, "languages", {
+      configurable: true,
+      value: ["ja-JP"],
+    });
+    const failedSplit: JobSnapshot = {
+      ...completed,
+      kind: "split",
+      status: "failed",
+      phase: "failed",
+      outputPath: "/output/archive.part1.pna",
+      error: "backend wording intentionally changed",
+      errorCode: "OUTPUT_ALREADY_EXISTS",
+    };
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") return [failedSplit];
+      return failedSplit;
+    });
+
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+
+    const bar = await screen.findByRole("region", {
+      name: "バックグラウンドジョブ",
+    });
+    expect(
+      within(bar).getByText("出力ファイルは既に存在します。"),
+    ).toBeVisible();
+    expect(
+      within(bar).getByText(
+        "既存ファイルを移動または名前変更するか、別の出力先を選んでから再試行してください。",
+      ),
+    ).toBeVisible();
+    expect(
+      within(bar).queryByText(/backend wording intentionally changed/),
+    ).not.toBeInTheDocument();
+    expect(
+      within(bar).getByRole("button", { name: "保存先を表示" }),
+    ).toBeVisible();
+  });
+
   it("[UI-UX-JOB-OPEN-TRANSITION] closes the job center after opening its result", async () => {
     // The destination view or password prompt must not remain hidden by the job center.
     const onOpenArchive = vi.fn().mockResolvedValue(undefined);

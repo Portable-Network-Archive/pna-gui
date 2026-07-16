@@ -84,6 +84,7 @@ export function localizeError(error: AppErrorDto, t: Translate): AppErrorDto {
       INVALID_ARGUMENT: t("errorInvalidArgument"),
       PASSWORD_REQUIRED: t("errorPasswordRequired"),
       WRONG_PASSWORD: t("errorWrongPassword"),
+      ENCRYPTED_DATA_UNVERIFIABLE: t("errorEncryptedDataUnverifiable"),
       PATH_NOT_FOUND: t("errorPathNotFound"),
       PERMISSION_DENIED: t("errorPermissionDenied"),
       IO_ERROR: t("errorIo"),
@@ -93,6 +94,7 @@ export function localizeError(error: AppErrorDto, t: Translate): AppErrorDto {
     {
       PASSWORD_REQUIRED: t("actionEnterPassword"),
       WRONG_PASSWORD: t("actionCheckPassword"),
+      ENCRYPTED_DATA_UNVERIFIABLE: t("actionRecreateWithIntegrity"),
       PATH_NOT_FOUND: t("actionCheckLocation"),
     }[error.code] ?? error.userAction;
   return { ...error, message, userAction };
