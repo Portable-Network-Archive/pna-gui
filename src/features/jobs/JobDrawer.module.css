@@ -1,0 +1,288 @@
+.bar {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  min-height: 64px;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid var(--app-border);
+  background: #fbfcfd;
+}
+
+.summary {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  border: 0;
+  border-right: 1px solid var(--app-border);
+  color: var(--app-text);
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.summary:hover {
+  background: var(--app-hover);
+}
+
+.summary:focus-visible,
+.dismissButton:focus-visible {
+  outline: 2px solid var(--app-blue);
+  outline-offset: -3px;
+}
+
+.summary > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.summary strong,
+.summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary strong {
+  font-size: 12px;
+}
+
+.summary small {
+  color: var(--app-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.summaryIcon,
+.statusIcon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--app-muted);
+}
+
+.job {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+}
+
+.job[data-status="succeeded"] .statusIcon {
+  color: #287a4b;
+}
+
+.job[data-status="failed"] .statusIcon,
+.job[data-status="interrupted"] .statusIcon {
+  color: var(--app-error);
+}
+
+.jobInfo {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.jobTitle {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.jobTitle strong {
+  font-size: 12px;
+}
+
+.jobTitle span,
+.jobDetail,
+.jobInfo small {
+  color: var(--app-muted);
+  font-size: 11px;
+}
+
+.jobDetail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outputIdentity {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.outputIdentity strong,
+.outputIdentity small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outputIdentity strong {
+  color: #344054;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.outputIdentity small {
+  direction: rtl;
+  text-align: left;
+}
+
+.jobInfo progress {
+  width: min(420px, 100%);
+  height: 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 2px;
+  accent-color: var(--app-blue);
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.error {
+  overflow-wrap: anywhere;
+  color: var(--app-error) !important;
+}
+
+.warning {
+  overflow-wrap: anywhere;
+  color: #8a5a00 !important;
+}
+
+.cancelHint {
+  color: #475467 !important;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.dismissButton {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--app-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.dismissButton:hover {
+  border-color: var(--app-border);
+  color: var(--app-text);
+  background: var(--app-panel);
+}
+
+.center {
+  overscroll-behavior: contain;
+}
+
+.centerToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--app-border);
+  color: var(--app-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.centerList {
+  max-height: min(430px, 58dvh);
+  overflow: auto;
+}
+
+.centerList .job {
+  min-height: 74px;
+  padding-inline: 4px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.actionError {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border-top: 1px solid #efcaca;
+  color: var(--app-error);
+  font-size: 11px;
+  background: var(--app-error-bg);
+}
+
+.actionError span {
+  overflow-wrap: anywhere;
+}
+
+.actionError button {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: currentColor;
+  background: transparent;
+  cursor: pointer;
+}
+
+.actionError button:hover,
+.actionError button:focus-visible {
+  border-color: #dcaeae;
+  background: #fff;
+}
+
+.actionError button:focus-visible {
+  outline: 2px solid var(--app-blue);
+  outline-offset: 1px;
+}
+
+@media (max-width: 760px) {
+  .bar {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .summary {
+    justify-content: center;
+    padding-inline: 8px;
+  }
+
+  .summary > span:last-child {
+    display: none;
+  }
+
+  .job {
+    padding-inline: 10px;
+  }
+
+  .actions button:not(.dismissButton) {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

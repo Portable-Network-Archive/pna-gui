@@ -231,6 +231,42 @@ impl ReaderState {
         *recent = next;
         Ok(())
     }
+
+    pub(crate) fn remember_created(
+        &self,
+        path: &Path,
+        entry_count: usize,
+    ) -> Result<(), AppErrorDto> {
+        let metadata = fs::metadata(path).map_err(|error| {
+            AppErrorDto::new(
+                "IO_ERROR",
+                format!("The created archive could not be added to Recents: {error}"),
+                true,
+            )
+        })?;
+        let display_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        let path = path.to_string_lossy().into_owned();
+        let mut recent = self.recent.lock().map_err(|_| AppErrorDto::internal())?;
+        let mut next = recent.clone();
+        next.retain(|item| item.path != path);
+        next.insert(
+            0,
+            ArchiveRecent {
+                path,
+                display_name,
+                entry_count,
+                stored_bytes: metadata.len(),
+                last_opened_at: unix_now(),
+            },
+        );
+        next.truncate(MAX_RECENT_ITEMS);
+        persist_recent(&self.recent_path, &next)?;
+        *recent = next;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -1210,6 +1246,26 @@ mod tests {
             "INTERNAL_ERROR"
         );
         assert!(impossible.recent.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn created_archive_is_remembered_without_opening_and_survives_restart() {
+        // BE-UX-CREATE-RESULT-RECENT
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("created-result.pna");
+        fs::write(&archive_path, b"created archive bytes").unwrap();
+        let recent_path = temp.path().join("state/recent.json");
+        let state = ReaderState::new(recent_path.clone());
+
+        state.remember_created(&archive_path, 7).unwrap();
+
+        let reopened = ReaderState::new(recent_path);
+        let recent = reopened.recent.lock().unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].path, archive_path.to_string_lossy());
+        assert_eq!(recent[0].display_name, "created-result.pna");
+        assert_eq!(recent[0].entry_count, 7);
+        assert_eq!(recent[0].stored_bytes, 21);
     }
 
     #[test]

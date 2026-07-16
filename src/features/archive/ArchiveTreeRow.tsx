@@ -23,13 +23,18 @@ export function ArchiveTreeRow({
   return (
     <div className={`${styles.row} ${active ? styles.active : ""}`}>
       <button
+        type="button"
         className={styles.toggle}
         aria-label={`${name}: ${expanded ? collapseLabel : expandLabel}`}
         onClick={onToggle}
       >
-        {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+        {expanded ? (
+          <ChevronDownIcon aria-hidden="true" />
+        ) : (
+          <ChevronRightIcon aria-hidden="true" />
+        )}
       </button>
-      <button className={styles.name} onClick={onNavigate}>
+      <button type="button" className={styles.name} onClick={onNavigate}>
         <FolderGlyph />
         <span className={styles.label}>{name}</span>
       </button>

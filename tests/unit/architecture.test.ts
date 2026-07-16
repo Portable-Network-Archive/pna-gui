@@ -5,23 +5,38 @@ import { describe, expect, it } from "vitest";
 const root = resolve(import.meta.dirname, "../..");
 
 describe("shipped feature boundaries", () => {
-  it("keeps the legacy extract component dormant", () => {
-    // ARCH-UI-EXTRACT-DORMANT
+  it("ships extraction through the archive browser instead of the legacy tab", () => {
+    // ARCH-P2-UI-EXTRACT-VISIBLE
     const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
     const tabs = readFileSync(resolve(root, "src/tabs/index.ts"), "utf8");
     expect(app).not.toMatch(/import\s+\{?\s*Extract\b/);
-    expect(app).not.toContain("<Extract");
+    expect(app).toContain("<ExtractDialog");
+    expect(app).toContain("jobApi.startExtract");
     expect(tabs).not.toMatch(/(?:import|export)[^;]*\bExtract\b/);
   });
 
-  it("keeps extraction available only through its registered IPC contract", () => {
-    // ARCH-IPC-EXTRACT-REGISTERED, ARCH-IPC-EXTRACT-DESTINATION-REQUIRED
+  it("registers the phase two job IPC with a required extraction destination", () => {
+    // ARCH-P2-IPC-JOBS-REGISTERED, ARCH-IPC-EXTRACT-DESTINATION-REQUIRED, ARCH-UX-JOB-RESULT-COMMANDS
     const backend = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
-    expect(backend).toMatch(/async fn extract\([\s\S]*out_dir: PathBuf/);
-    expect(backend).toMatch(/generate_handler!\[[\s\S]*\bextract,/);
-    expect(backend).not.toMatch(
-      /async fn extract\([\s\S]*out_dir: Option<PathBuf>/,
+    const operations = readFileSync(
+      resolve(root, "src-tauri/src/operations.rs"),
+      "utf8",
     );
+    for (const command of [
+      "job_start_create",
+      "job_start_extract",
+      "job_list",
+      "job_cancel",
+      "job_retry",
+      "job_dismiss",
+      "job_reveal_output",
+    ]) {
+      expect(backend).toMatch(
+        new RegExp(`generate_handler!\\[[\\s\\S]*\\b${command},?`),
+      );
+    }
+    expect(operations).toMatch(/pub destination: PathBuf/);
+    expect(operations).not.toMatch(/pub destination: Option<PathBuf>/);
   });
 
   it("preserves the five-platform CI architecture", () => {
@@ -149,6 +164,7 @@ describe("shipped feature boundaries", () => {
     ).toBeUndefined();
     expect(packageJson.devDependencies["@wdio/tauri-plugin"]).toBeDefined();
     expect(releaseVerifier).toContain('"wdioTauri"');
+    expect(releaseVerifier).toContain('"[WDIO Tauri Plugin]"');
     expect(releaseVerifier).toContain('"Drop .pna file here"');
   });
 
@@ -184,5 +200,12 @@ describe("shipped feature boundaries", () => {
     expect(workflow).toContain("npm run test:e2e:build");
     expect(workflow).toContain("xvfb-run -a npm run test:e2e");
     expect(workflow).toContain("matrix.platform == 'ubuntu-latest'");
+  });
+
+  it("does not discard background job event delivery failures", () => {
+    // ARCH-P2-JOB-EVENT-ERROR-VISIBLE
+    const backend = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
+    expect(backend).toContain("failed to emit job-update event");
+    expect(backend).not.toContain('let _ = app.emit("job-update"');
   });
 });

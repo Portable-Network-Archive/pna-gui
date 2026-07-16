@@ -14,6 +14,7 @@ const bridge = vi.hoisted(() => ({
   getMatches: vi.fn(),
   openDialog: vi.fn(),
   dragHandler: undefined as ((event: DragDropEvent) => void) | undefined,
+  dragHandlers: [] as Array<(event: DragDropEvent) => void>,
   menuHandler: undefined as
     | ((event: { payload: "extract" | "create" }) => void)
     | undefined,
@@ -29,13 +30,18 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
   getCurrentWebviewWindow: () => ({
     onDragDropEvent: async (handler: (event: DragDropEvent) => void) => {
       bridge.dragHandler = handler;
-      return () => undefined;
+      bridge.dragHandlers.push(handler);
+      return () => {
+        bridge.dragHandlers = bridge.dragHandlers.filter(
+          (registered) => registered !== handler,
+        );
+      };
     },
     listen: async (
-      _event: string,
+      event: string,
       handler: (event: { payload: "extract" | "create" }) => void,
     ) => {
-      bridge.menuHandler = handler;
+      if (event === "switch_tab") bridge.menuHandler = handler;
       return () => undefined;
     },
   }),
@@ -91,11 +97,17 @@ function installInvokeHandler(options?: {
   recentItems?: ArchiveRecent[];
   openError?: unknown;
   searchItems?: ArchiveEntry[];
+  bootstrapDelayMs?: number;
 }) {
   bridge.invoke.mockImplementation(
     async (command: string, args?: Record<string, unknown>) => {
       switch (command) {
         case "app_bootstrap":
+          if (options?.bootstrapDelayMs) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, options.bootstrapDelayMs),
+            );
+          }
           return {
             productName: "Portable Network Archive",
             recent: options?.recentItems ?? [],
@@ -129,6 +141,10 @@ function installInvokeHandler(options?: {
             group: null,
             xattrCount: 0,
           };
+        case "job_start_extract":
+          return { id: "job-restore", kind: "extract", status: "queued" };
+        case "job_list":
+          return [];
         default:
           throw new Error(`Unexpected command: ${command}`);
       }
@@ -145,7 +161,9 @@ async function renderHome(recentItems: ArchiveRecent[] = []) {
 async function openRecentArchive() {
   await renderHome([recent]);
   await userEvent.click(
-    screen.getByRole("button", { name: /^demo\.pna \/tmp\/demo\.pna$/ }),
+    await screen.findByRole("button", {
+      name: /^demo\.pna \/tmp\/demo\.pna$/,
+    }),
   );
   await screen.findByRole("button", { name: "Open another archive" });
 }
@@ -159,6 +177,7 @@ describe("application shell", () => {
       .mockResolvedValue({ args: { source: { value: null } } });
     bridge.openDialog.mockReset().mockResolvedValue(null);
     bridge.dragHandler = undefined;
+    bridge.dragHandlers = [];
     bridge.menuHandler = undefined;
     document.documentElement.lang = "en";
   });
@@ -166,7 +185,9 @@ describe("application shell", () => {
   it("[UI-HOME-EMPTY] renders the empty English home state", async () => {
     await renderHome();
     expect(screen.getByText("No recent archives")).toBeVisible();
-    expect(screen.getByRole("button", { name: /Recent 0/ })).toBeVisible();
+    const navigation = screen.getByLabelText("Navigation");
+    expect(within(navigation).getByText("Recent")).toBeVisible();
+    expect(within(navigation).getByText("0")).toBeVisible();
     expect(
       screen.getByText("Select an archive in the list to see its information."),
     ).toBeVisible();
@@ -189,11 +210,22 @@ describe("application shell", () => {
     const inspector = screen.getByLabelText("Selected archive");
     expect(within(inspector).getByText("demo.pna")).toBeVisible();
     await userEvent.click(
-      within(row).getByRole("button", { name: /Remove from Recents/ }),
+      within(inspector).getByRole("button", { name: "Remove from Recents" }),
     );
     expect(bridge.invoke).toHaveBeenCalledWith("recent_remove", {
       path: recent.path,
     });
+  });
+
+  it("[UI-UX-HOME-ROW-KEYBOARD] opens a recent archive from its single primary keyboard stop", async () => {
+    await renderHome([recent]);
+    const row = screen.getByRole("row", { name: /demo\.pna/ });
+    expect(within(row).getAllByRole("button")).toHaveLength(1);
+    within(row)
+      .getByRole("button", { name: /demo\.pna/ })
+      .focus();
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByTestId("archive-browser")).toBeVisible();
   });
 
   it("[UI-BROWSER-TREE] renders a bounded folder icon, visible tree label, and null metadata", async () => {
@@ -227,9 +259,59 @@ describe("application shell", () => {
     expect(screen.getByText("Search results for “missing”")).toBeVisible();
   });
 
+  it("[UI-UX-SEARCH-SUBMIT-AFFORDANCE] offers a visible search action in addition to Enter", async () => {
+    await openRecentArchive();
+    const search = screen.getByRole("textbox", { name: "Search archive" });
+    await userEvent.type(search, "missing");
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(bridge.invoke).toHaveBeenCalledWith("archive_search", {
+      handle: summary.handle,
+      query: "missing",
+      cursor: undefined,
+      limit: 200,
+    });
+  });
+
+  it("[UI-UX-SEARCH-LOCATION] distinguishes same-name search results by relative path", async () => {
+    const duplicateA: ArchiveEntry = {
+      ...directory,
+      id: "entry-a",
+      path: "input/Folder A/same-name.txt",
+      name: "same-name.txt",
+      kind: "file",
+      hasChildren: false,
+    };
+    const duplicateB: ArchiveEntry = {
+      ...duplicateA,
+      id: "entry-b",
+      path: "input/Folder B/same-name.txt",
+    };
+    installInvokeHandler({
+      recentItems: [recent],
+      searchItems: [duplicateA, duplicateB],
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Recent archives" });
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /^demo\.pna \/tmp\/demo\.pna$/,
+      }),
+    );
+    const search = await screen.findByRole("textbox", {
+      name: "Search archive",
+    });
+    await userEvent.type(search, "same-name{Enter}");
+
+    expect(
+      await screen.findByText("input/Folder A/same-name.txt"),
+    ).toBeVisible();
+    expect(screen.getByText("input/Folder B/same-name.txt")).toBeVisible();
+  });
+
   it("[UI-OPEN-PASSWORD] requires a nonempty password without persisting it", async () => {
     installInvokeHandler({
       recentItems: [recent],
+      bootstrapDelayMs: 25,
       openError: {
         code: "PASSWORD_REQUIRED",
         message: "backend message",
@@ -239,13 +321,41 @@ describe("application shell", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "Recent archives" });
     await userEvent.click(
-      screen.getByRole("button", { name: /^demo\.pna \/tmp\/demo\.pna$/ }),
+      await screen.findByRole("button", {
+        name: /^demo\.pna \/tmp\/demo\.pna$/,
+      }),
     );
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", { name: "Open" });
     expect(submit).toBeDisabled();
     await userEvent.type(within(dialog).getByLabelText("Password"), "secret");
     expect(submit).toBeEnabled();
+  });
+
+  it("[UI-UX-OPEN-ERROR-RECOVERY] names the failed archive, offers recovery, and dismisses with Escape", async () => {
+    installInvokeHandler({
+      recentItems: [recent],
+      bootstrapDelayMs: 25,
+      openError: {
+        code: "ARCHIVE_CORRUPT",
+        message: "backend message",
+        retryable: true,
+      },
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Recent archives" });
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /^demo\.pna \/tmp\/demo\.pna$/,
+      }),
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("/tmp/demo.pna");
+    expect(
+      within(alert).getByRole("button", { name: "Choose another archive" }),
+    ).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("[UI-DROP-ARCHIVE] exposes drag feedback and opens the first PNA path", async () => {
@@ -280,9 +390,110 @@ describe("application shell", () => {
       screen.getByRole("button", { name: /Create new archive/ }),
     );
     expect(screen.getByText("Drop files here")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
+  it("[UI-CREATE-DROP-ISOLATION] keeps dropped archives in the create flow", async () => {
+    await renderHome();
+    await userEvent.click(
+      screen.getByRole("button", { name: /Create new archive/ }),
+    );
+    const drop = {
+      payload: {
+        type: "drop",
+        paths: ["/tmp/source.pna"],
+        position: { x: 0, y: 0 },
+      },
+    } as DragDropEvent;
+
+    act(() => bridge.dragHandlers.forEach((handler) => handler(drop)));
+
+    expect(await screen.findByText("/tmp/source.pna")).toBeVisible();
+    expect(bridge.invoke).not.toHaveBeenCalledWith("archive_open", {
+      path: "/tmp/source.pna",
+      password: undefined,
+    });
+  });
+
+  it("[UI-P2-EXTRACT-JOB] starts extraction only after a destination is selected", async () => {
+    await openRecentArchive();
+    await userEvent.click(screen.getByRole("button", { name: "Extract" }));
+    const dialog = screen.getByRole("dialog");
+    const start = within(dialog).getByRole("button", {
+      name: "Extract All Items",
+    });
+    expect(start).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Create new archive" }),
+      within(dialog).getByText(
+        "A folder named demo will be created inside the selected destination.",
+      ),
+    ).toBeVisible();
+    bridge.openDialog.mockResolvedValue("/tmp/restore");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Choose destination" }),
+    );
+    expect(start).toBeEnabled();
+    await userEvent.click(start);
+    expect(bridge.invoke).toHaveBeenCalledWith("job_start_extract", {
+      request: {
+        archivePath: "/tmp/demo.pna",
+        destination: "/tmp/restore",
+        entries: [],
+        password: null,
+        conflict: "rename",
+        restorePermissions: true,
+        keepCompletedOnCancel: true,
+      },
+    });
+  });
+
+  it("[UI-UX-EXTRACT-SELECTED-DEFAULT] defaults to the selected item and names the extraction scope", async () => {
+    await openRecentArchive();
+    const selectedRow = await screen.findByRole("row", { name: /src Folder/ });
+    await userEvent.click(selectedRow);
+    await screen.findByRole("heading", { name: "Selected item" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Extract" }));
+    const dialog = screen.getByRole("dialog", { name: "Extract archive" });
+    expect(
+      within(dialog).getByRole("checkbox", {
+        name: "Extract only the selected item",
+      }),
+    ).toBeChecked();
+    expect(
+      within(dialog).getByRole("button", { name: "Extract Selected Item" }),
     ).toBeDisabled();
+
+    bridge.openDialog.mockResolvedValue("/tmp/restore");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Choose destination" }),
+    );
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Extract Selected Item" }),
+    );
+
+    expect(bridge.invoke).toHaveBeenCalledWith("job_start_extract", {
+      request: expect.objectContaining({ entries: ["src"] }),
+    });
+  });
+
+  it("[UI-P2-OPEN-SINGLE-FLIGHT] ignores duplicate open actions while indexing", async () => {
+    await renderHome([recent]);
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "archive_open") return new Promise(() => undefined);
+      if (command === "job_list") return [];
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    const open = screen.getByRole("button", {
+      name: /^demo\.pna \/tmp\/demo\.pna$/,
+    });
+    await userEvent.click(open);
+    await userEvent.click(open);
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) => command === "archive_open",
+      ),
+    ).toHaveLength(1);
   });
 
   it("[UI-OPEN-CLI] opens a PNA path supplied by the registered command-line argument", async () => {

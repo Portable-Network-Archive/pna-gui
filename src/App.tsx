@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyboardEvent, useCallback, useEffect, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -13,6 +13,7 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
   ReloadIcon,
+  DownloadIcon,
 } from "@radix-ui/react-icons";
 import {
   Button,
@@ -58,6 +59,8 @@ import type {
   SortSpec,
 } from "./features/archive/types";
 import styles from "./App.module.css";
+import { jobApi } from "./features/jobs/api";
+import JobDrawer from "./features/jobs/JobDrawer";
 
 registerE2eBridge();
 
@@ -86,6 +89,7 @@ function AppContent() {
   const [passwordPath, setPasswordPath] = useState<string>();
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string>();
+  const openingRef = useRef(false);
 
   const refreshBootstrap = useCallback(async () => {
     try {
@@ -97,6 +101,8 @@ function AppContent() {
 
   const openArchivePath = useCallback(
     async (path: string, suppliedPassword?: string) => {
+      if (openingRef.current) return;
+      openingRef.current = true;
       setBusy(true);
       setError(undefined);
       try {
@@ -121,9 +127,10 @@ function AppContent() {
               : undefined,
           );
         } else {
-          setError(appError);
+          setError({ ...appError, context: path });
         }
       } finally {
+        openingRef.current = false;
         setBusy(false);
       }
     },
@@ -160,6 +167,7 @@ function AppContent() {
         if (disposed) return;
         const appWindow = getCurrentWebviewWindow();
         const unlistenDrop = await appWindow.onDragDropEvent((event) => {
+          if (view === "create") return;
           if (event.payload.type === "enter") setDragActive(true);
           if (event.payload.type === "leave") setDragActive(false);
           if (event.payload.type === "drop") {
@@ -196,7 +204,7 @@ function AppContent() {
       disposed = true;
       cleanups.forEach((cleanup) => cleanup());
     };
-  }, [chooseArchive, openArchivePath]);
+  }, [chooseArchive, openArchivePath, view]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -254,11 +262,11 @@ function AppContent() {
               className={styles.toolbarButton}
               onClick={() => setView("home")}
             >
-              <ArrowLeftIcon /> {t("backHome")}
+              <ArrowLeftIcon aria-hidden="true" /> {t("backHome")}
             </button>
             <div>
               <strong>{t("createArchive")}</strong>
-              <span>{t("currentCreateFeature")}</span>
+              <span>{t("createArchiveSubtitle")}</span>
             </div>
           </header>
           <div className={styles.legacyContent}>
@@ -269,7 +277,7 @@ function AppContent() {
 
       {dragActive && (
         <div className={styles.dropOverlay} role="status">
-          <ArchiveIcon />
+          <ArchiveIcon aria-hidden="true" />
           <strong>{t("dropArchive")}</strong>
         </div>
       )}
@@ -312,6 +320,7 @@ function AppContent() {
               <TextField.Root
                 autoFocus
                 type="password"
+                name="archive-password"
                 value={password}
                 onChange={(event) => {
                   setPassword(event.target.value);
@@ -331,13 +340,21 @@ function AppContent() {
                   {t("cancel")}
                 </Button>
               </Dialog.Close>
-              <Button type="submit" disabled={!password || busy}>
+              <Button
+                type="submit"
+                data-testid="archive-password-submit"
+                disabled={!password || busy}
+              >
                 {t("open")}
               </Button>
             </Flex>
           </form>
         </Dialog.Content>
       </Dialog.Root>
+      <JobDrawer
+        onOpenArchive={openArchivePath}
+        onCreatedArchive={refreshBootstrap}
+      />
     </div>
   );
 }
@@ -370,20 +387,29 @@ function HomeView({
   return (
     <div className={styles.shell} data-testid="home-view">
       <AppToolbar title={productName} onOpen={onOpen} onCreate={onCreate} />
-      {error && <ErrorBanner error={error} onDismiss={onDismissError} />}
+      {error && (
+        <ErrorBanner
+          error={error}
+          onDismiss={onDismissError}
+          onChooseAnother={onOpen}
+        />
+      )}
       <div className={styles.workspace}>
         <aside className={styles.sidebar} aria-label={t("navigation")}>
           <div className={styles.sidebarTitle}>{t("navigation")}</div>
-          <button className={`${styles.navItem} ${styles.navItemActive}`}>
-            <HomeIcon /> {t("home")}
-          </button>
+          <div
+            className={`${styles.navItem} ${styles.navItemActive} ${styles.navItemStatic}`}
+            aria-current="page"
+          >
+            <HomeIcon aria-hidden="true" /> {t("home")}
+          </div>
           <div className={styles.sidebarSection}>
             <span>{t("archives")}</span>
           </div>
-          <button className={styles.navItem}>
-            <ClockIcon /> {t("recent")}
+          <div className={`${styles.navItem} ${styles.navItemStatic}`}>
+            <ClockIcon aria-hidden="true" /> {t("recent")}
             <span className={styles.countBadge}>{recent.length}</span>
-          </button>
+          </div>
           <p className={styles.sidebarHint}>{t("dropHint")}</p>
         </aside>
 
@@ -403,17 +429,17 @@ function HomeView({
                 <strong>{t("openArchive")}</strong>
                 <small>{t("openArchiveDescription")}</small>
               </span>
-              <ArrowRightIcon />
+              <ArrowRightIcon aria-hidden="true" />
             </button>
             <button className={styles.actionCard} onClick={onCreate}>
               <span className={styles.actionIcon}>
-                <PlusIcon />
+                <PlusIcon aria-hidden="true" />
               </span>
               <span>
                 <strong>{t("createArchive")}</strong>
                 <small>{t("createArchiveDescription")}</small>
               </span>
-              <ArrowRightIcon />
+              <ArrowRightIcon aria-hidden="true" />
             </button>
           </div>
 
@@ -423,7 +449,7 @@ function HomeView({
           >
             {recent.length === 0 ? (
               <div className={styles.emptyState}>
-                <ArchiveIcon />
+                <ArchiveIcon aria-hidden="true" />
                 <strong>{t("noRecentArchives")}</strong>
                 <p>{t("noRecentArchivesHint")}</p>
                 <Button onClick={onOpen}>{t("openArchive")}</Button>
@@ -436,7 +462,6 @@ function HomeView({
                     <th>{t("items")}</th>
                     <th>{t("size")}</th>
                     <th>{t("lastUsed")}</th>
-                    <th aria-label={t("actions")} />
                   </tr>
                 </thead>
                 <tbody>
@@ -456,7 +481,7 @@ function HomeView({
                           className={styles.nameButton}
                           onClick={() => onOpenRecent(item.path)}
                         >
-                          <ArchiveIcon />
+                          <ArchiveIcon aria-hidden="true" />
                           <span>
                             <strong>{item.displayName}</strong>
                             <small>{item.path}</small>
@@ -470,19 +495,6 @@ function HomeView({
                         {formatBytes(item.storedBytes, locale)}
                       </td>
                       <td>{formatDateTime(item.lastOpenedAt, locale)}</td>
-                      <td>
-                        <button
-                          className={styles.iconButton}
-                          aria-label={`${item.displayName}: ${t("removeFromRecent")}`}
-                          title={t("removeFromRecent")}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onRemoveRecent(item.path);
-                          }}
-                        >
-                          <Cross2Icon />
-                        </button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -508,9 +520,18 @@ function HomeView({
                   ],
                 ]}
               />
-              <Button onClick={() => onOpenRecent(selected.path)}>
-                {t("showContents")}
-              </Button>
+              <div className={styles.inspectorActions}>
+                <Button onClick={() => onOpenRecent(selected.path)}>
+                  {t("showContents")}
+                </Button>
+                <Button
+                  color="gray"
+                  variant="soft"
+                  onClick={() => onRemoveRecent(selected.path)}
+                >
+                  {t("removeFromRecent")}
+                </Button>
+              </div>
             </div>
           ) : (
             <div className={styles.inspectorEmpty}>
@@ -560,6 +581,7 @@ function BrowserView({
   const [preview, setPreview] = useState<PreviewDescriptor>();
   const [treePages, setTreePages] = useState<TreePages>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["root"]));
+  const [extractOpen, setExtractOpen] = useState(false);
 
   const currentTrail = history[historyIndex];
   const current = currentTrail[currentTrail.length - 1];
@@ -697,6 +719,12 @@ function BrowserView({
         <button className={styles.toolbarButton} onClick={onOpen}>
           <FolderGlyph /> {t("openAnotherArchive")}
         </button>
+        <button
+          className={styles.toolbarButton}
+          onClick={() => setExtractOpen(true)}
+        >
+          <DownloadIcon aria-hidden="true" /> {t("extract")}
+        </button>
         <div className={styles.toolbarSpacer} />
         <form
           className={styles.searchBox}
@@ -706,14 +734,24 @@ function BrowserView({
             setQuery(queryInput.trim());
           }}
         >
-          <MagnifyingGlassIcon />
           <input
             data-testid="archive-search"
             aria-label={t("searchArchive")}
+            name="archive-search"
+            autoComplete="off"
+            spellCheck={false}
             placeholder={t("searchPlaceholder")}
             value={queryInput}
             onChange={(event) => setQueryInput(event.target.value)}
           />
+          <button
+            type="submit"
+            className={styles.searchSubmit}
+            aria-label={t("submitSearch")}
+            title={t("submitSearch")}
+          >
+            <MagnifyingGlassIcon aria-hidden="true" />
+          </button>
           {queryInput && (
             <button
               type="button"
@@ -724,12 +762,18 @@ function BrowserView({
                 setQuery("");
               }}
             >
-              <Cross2Icon />
+              <Cross2Icon aria-hidden="true" />
             </button>
           )}
         </form>
       </header>
-      {error && <ErrorBanner error={error} onDismiss={onDismissError} />}
+      {error && (
+        <ErrorBanner
+          error={error}
+          onDismiss={onDismissError}
+          onChooseAnother={onOpen}
+        />
+      )}
       <div className={styles.browserWorkspace}>
         <aside
           className={styles.treeSidebar}
@@ -741,7 +785,7 @@ function BrowserView({
             className={styles.treeRoot}
             onClick={() => navigate([rootLocation])}
           >
-            <ArchiveIcon />
+            <ArchiveIcon aria-hidden="true" />
             <span>{archive.summary.displayName}</span>
           </button>
           <TreeBranch
@@ -776,7 +820,7 @@ function BrowserView({
               disabled={historyIndex === 0}
               onClick={() => setHistoryIndex((index) => Math.max(0, index - 1))}
             >
-              <ArrowLeftIcon />
+              <ArrowLeftIcon aria-hidden="true" />
             </button>
             <button
               className={styles.iconButton}
@@ -788,7 +832,7 @@ function BrowserView({
                 )
               }
             >
-              <ArrowRightIcon />
+              <ArrowRightIcon aria-hidden="true" />
             </button>
             <nav className={styles.breadcrumbs} aria-label={t("currentFolder")}>
               <button onClick={() => navigate([rootLocation])}>
@@ -796,7 +840,7 @@ function BrowserView({
               </button>
               {currentTrail.slice(1).map((location, index) => (
                 <span key={location.id}>
-                  <ChevronRightIcon />
+                  <ChevronRightIcon aria-hidden="true" />
                   <button
                     onClick={() => navigate(currentTrail.slice(0, index + 2))}
                   >
@@ -811,7 +855,7 @@ function BrowserView({
               title={t("reload")}
               onClick={() => setSort((currentSort) => ({ ...currentSort }))}
             >
-              <ReloadIcon />
+              <ReloadIcon aria-hidden="true" />
             </button>
           </div>
           {query && (
@@ -881,13 +925,23 @@ function BrowserView({
                     }
                   >
                     <td>
-                      <span className={styles.fileName}>
-                        {entry.kind === "directory" ? (
-                          <FolderGlyph />
-                        ) : (
-                          <FileIcon />
+                      <span className={styles.fileIdentity}>
+                        <span className={styles.fileName}>
+                          {entry.kind === "directory" ? (
+                            <FolderGlyph />
+                          ) : (
+                            <FileIcon />
+                          )}
+                          <span>{entry.name}</span>
+                        </span>
+                        {query && (
+                          <small
+                            className={styles.entryLocation}
+                            title={entry.path}
+                          >
+                            {entry.path}
+                          </small>
                         )}
-                        {entry.name}
                       </span>
                     </td>
                     <td>{kindLabel(entry.kind, t)}</td>
@@ -935,7 +989,193 @@ function BrowserView({
           preview={preview}
         />
       </div>
+      <ExtractDialog
+        open={extractOpen}
+        archive={archive}
+        selectedPath={details?.entry.path}
+        onOpenChange={setExtractOpen}
+        onError={onError}
+      />
     </div>
+  );
+}
+
+function ExtractDialog({
+  open,
+  archive,
+  selectedPath,
+  onOpenChange,
+  onError,
+}: {
+  open: boolean;
+  archive: OpenArchiveResult;
+  selectedPath?: string;
+  onOpenChange: (open: boolean) => void;
+  onError: (error: AppErrorDto) => void;
+}) {
+  const { t } = useI18n();
+  const [destination, setDestination] = useState("");
+  const [selectedOnly, setSelectedOnly] = useState(false);
+  const [conflict, setConflict] = useState<
+    "ask" | "overwrite" | "skip" | "rename"
+  >("rename");
+  const [restorePermissions, setRestorePermissions] = useState(true);
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const encrypted = archive.summary.encryptionMethods.some(
+    (method) => method.toLowerCase() !== "none",
+  );
+  const extractFolderName = archive.summary.displayName.replace(/\.pna$/i, "");
+  const conflictHelp = {
+    rename: t("conflictRenameHelp"),
+    overwrite: t("conflictOverwriteHelp"),
+    skip: t("conflictSkipHelp"),
+    ask: t("conflictStopHelp"),
+  }[conflict];
+  const readiness = !destination
+    ? t("chooseDestinationToContinue")
+    : encrypted && !password
+      ? t("enterPasswordToContinue")
+      : t("readyToExtract");
+
+  useEffect(() => {
+    if (open) setSelectedOnly(Boolean(selectedPath));
+  }, [open, selectedPath]);
+
+  const chooseDestination = async () => {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: t("chooseDestination"),
+    });
+    if (typeof selected === "string") setDestination(selected);
+  };
+
+  const start = async () => {
+    setSubmitting(true);
+    try {
+      await jobApi.startExtract({
+        archivePath: archive.summary.path,
+        destination,
+        entries: selectedOnly && selectedPath ? [selectedPath] : [],
+        password: password || null,
+        conflict,
+        restorePermissions,
+        keepCompletedOnCancel: true,
+      });
+      onOpenChange(false);
+      setDestination("");
+    } catch (caught) {
+      onError(normalizeAppError(caught));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content maxWidth="520px">
+        <Dialog.Title>{t("extractArchive")}</Dialog.Title>
+        <Dialog.Description>{t("extractDescription")}</Dialog.Description>
+        <div className={styles.extractForm}>
+          <label>
+            {t("destination")}
+            <div className={styles.destinationRow}>
+              <input
+                readOnly
+                name="extract-destination"
+                value={destination}
+                placeholder={t("destinationRequired")}
+                aria-describedby="extract-destination-hint extract-readiness"
+              />
+              <Button type="button" variant="soft" onClick={chooseDestination}>
+                {t("chooseDestination")}
+              </Button>
+            </div>
+          </label>
+          <p
+            id="extract-destination-hint"
+            className={styles.destinationPreview}
+          >
+            {t("extractFolderHint").replace("{name}", extractFolderName)}
+          </p>
+          <label>
+            {t("conflictPolicy")}
+            <select
+              name="conflict-policy"
+              value={conflict}
+              onChange={(event) =>
+                setConflict(event.target.value as typeof conflict)
+              }
+            >
+              <option value="rename">{t("conflictRename")}</option>
+              <option value="overwrite">{t("conflictOverwrite")}</option>
+              <option value="skip">{t("conflictSkip")}</option>
+              <option value="ask">{t("conflictAsk")}</option>
+            </select>
+          </label>
+          <p className={styles.formHint}>{conflictHelp}</p>
+          <label className={styles.checkRow}>
+            <input
+              type="checkbox"
+              checked={selectedOnly}
+              disabled={!selectedPath}
+              onChange={(event) => setSelectedOnly(event.target.checked)}
+            />
+            {t("extractSelectedOnly")}
+          </label>
+          {!selectedPath && (
+            <p className={styles.formHint}>{t("selectItemToExtractOnly")}</p>
+          )}
+          <label className={styles.checkRow}>
+            <input
+              type="checkbox"
+              checked={restorePermissions}
+              onChange={(event) => setRestorePermissions(event.target.checked)}
+            />
+            {t("restorePermissions")}
+          </label>
+          {encrypted && (
+            <label>
+              {t("password")}
+              <input
+                type="password"
+                name="archive-password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+          )}
+          <p id="extract-readiness" className={styles.extractReadiness}>
+            {readiness}
+          </p>
+        </div>
+        <Flex mt="5" gap="3" justify="end">
+          <Button
+            type="button"
+            variant="soft"
+            color="gray"
+            onClick={() => onOpenChange(false)}
+          >
+            {t("cancel")}
+          </Button>
+          <Button
+            type="button"
+            disabled={!destination || submitting || (encrypted && !password)}
+            aria-busy={submitting}
+            aria-describedby="extract-readiness"
+            onClick={start}
+          >
+            {submitting
+              ? t("startingExtraction")
+              : selectedOnly && selectedPath
+                ? t("startExtractingSelected")
+                : t("startExtractingAll")}
+          </Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -952,12 +1192,12 @@ function AppToolbar({
   return (
     <header className={styles.toolbar}>
       <div className={styles.brand}>
-        <ArchiveIcon />
+        <ArchiveIcon aria-hidden="true" />
         <strong>{title}</strong>
       </div>
       <div className={styles.toolbarDivider} />
       <button className={styles.toolbarButton} onClick={onCreate}>
-        <PlusIcon /> {t("newArchive")}
+        <PlusIcon aria-hidden="true" /> {t("newArchive")}
       </button>
       <button className={styles.toolbarButton} onClick={onOpen}>
         <FolderGlyph /> {t("open")}
@@ -971,24 +1211,47 @@ function AppToolbar({
 function ErrorBanner({
   error,
   onDismiss,
+  onChooseAnother,
 }: {
   error: AppErrorDto;
   onDismiss: () => void;
+  onChooseAnother?: () => void;
 }) {
   const { t } = useI18n();
   const localized = localizeError(error, t);
+  useEffect(() => {
+    const dismissOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") onDismiss();
+    };
+    window.addEventListener("keydown", dismissOnEscape);
+    return () => window.removeEventListener("keydown", dismissOnEscape);
+  }, [onDismiss]);
   return (
     <div className={styles.errorBanner} role="alert">
       <div>
         <strong>{localized.message}</strong>
+        {error.context && (
+          <span className={styles.errorContext}>{error.context}</span>
+        )}
         {localized.userAction && <span>{localized.userAction}</span>}
       </div>
+      {error.context && onChooseAnother && (
+        <Button
+          type="button"
+          size="1"
+          variant="soft"
+          color="gray"
+          onClick={onChooseAnother}
+        >
+          {t("chooseAnotherArchive")}
+        </Button>
+      )}
       <button
         className={styles.iconButton}
         aria-label={t("dismissError")}
         onClick={onDismiss}
       >
-        <Cross2Icon />
+        <Cross2Icon aria-hidden="true" />
       </button>
     </div>
   );
@@ -1071,7 +1334,7 @@ function Inspector({
             {details.entry.kind === "directory" ? (
               <FolderGlyph />
             ) : (
-              <FileIcon />
+              <FileIcon aria-hidden="true" />
             )}
             <strong>{details.entry.name}</strong>
           </div>
@@ -1090,7 +1353,7 @@ function Inspector({
             )}
             {preview?.kind === "unsupported" && (
               <div className={styles.previewUnavailable}>
-                <FileIcon />
+                <FileIcon aria-hidden="true" />
                 <span>{previewMessage(preview.messageCode, t)}</span>
               </div>
             )}
@@ -1142,7 +1405,7 @@ function Inspector({
         </div>
       ) : (
         <div className={styles.summaryInspector}>
-          <ArchiveIcon className={styles.largeArchiveIcon} />
+          <ArchiveIcon className={styles.largeArchiveIcon} aria-hidden="true" />
           <strong>{summary.displayName}</strong>
           <span className={styles.pathText}>{summary.path}</span>
           <DefinitionList

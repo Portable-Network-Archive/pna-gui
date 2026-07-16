@@ -3,6 +3,7 @@ export interface AppErrorDto {
   message: string;
   userAction?: string;
   retryable: boolean;
+  context?: string;
 }
 
 export interface ArchiveRecent {

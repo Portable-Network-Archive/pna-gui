@@ -1,141 +1,377 @@
-.root {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
+.wizard {
+  display: grid;
+  width: min(920px, 100%);
   height: 100%;
-  gap: 12px;
-}
-
-.fileArea {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  border: 1.5px dashed var(--gray-a5);
-  border-radius: 12px;
   min-height: 0;
-  transition:
-    border-color 0.3s ease,
-    background-color 0.3s ease,
-    box-shadow 0.3s ease;
-  overflow: hidden;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 14px;
+  margin: 0 auto;
+  padding: 20px 28px;
+  color: var(--app-text);
 }
 
-.fileArea:hover {
-  border-color: var(--accent-7);
-}
-
-.fileArea.dragOver {
-  border: 2px dashed var(--accent-7);
-  background: var(--accent-a2);
-  box-shadow: inset 0 0 30px var(--accent-a2);
-}
-
-.fileAreaEmpty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  cursor: default;
+  padding: 0;
+  margin: 0;
+  list-style: none;
 }
 
-.fileAreaHint {
-  color: var(--gray-a9);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.fileAreaSubHint {
-  color: var(--gray-a7);
+.steps li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-bottom: 2px solid var(--app-border);
+  color: var(--app-muted);
   font-size: 12px;
 }
 
-.fileList {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
+.steps li span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8ecf2;
+  font-variant-numeric: tabular-nums;
 }
 
-.fileItem {
+.steps li[data-active="true"] {
+  border-color: var(--app-blue);
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.steps li[data-active="true"] span,
+.steps li[data-complete="true"] span {
+  color: #fff;
+  background: var(--app-blue);
+}
+
+.panel {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-panel);
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 18px;
+  text-wrap: balance;
+}
+
+.panel > p:first-child {
+  margin-top: 0;
+  color: var(--app-muted);
+  font-size: 13px;
+  text-wrap: pretty;
+}
+
+.dropZone {
+  display: grid;
+  width: 100%;
+  min-height: 124px;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  padding: 16px;
+  border: 1px dashed var(--app-border-strong);
+  border-radius: 7px;
+  color: var(--app-muted);
+  background: #fbfcfd;
+  cursor: pointer;
+}
+
+.dropZone:hover {
+  border-color: #8baedc;
+  background: #f6f9fd;
+}
+
+.dropZone:focus-visible,
+.sources button:focus-visible,
+.presets button:focus-visible,
+.notice button:focus-visible {
+  outline: 2px solid var(--app-blue);
+  outline-offset: 2px;
+}
+
+.dropZone strong {
+  color: var(--app-text);
+  font-size: 13px;
+}
+
+.dropZone span {
+  font-size: 11px;
+}
+
+.dragOver {
+  border-color: var(--app-blue);
+  background: var(--app-blue-soft);
+}
+
+.sourceActions,
+.wizardActions {
   display: flex;
+  gap: 8px;
+}
+
+.sourceActions {
+  margin-top: 12px;
+}
+
+.wizardActions {
+  align-items: center;
+  min-height: 36px;
+}
+
+.wizardActions span {
+  flex: 1;
+}
+
+.sources {
+  padding: 0;
+  margin: 14px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  list-style: none;
+}
+
+.sources li {
+  display: grid;
+  min-height: 38px;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
   align-items: center;
   gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.sources li:last-child {
+  border-bottom: 0;
+}
+
+.sources li span {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sources button,
+.notice button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--app-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.sources button:hover,
+.notice button:hover {
+  border-color: var(--app-border);
+  color: var(--app-text);
+  background: #fff;
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 20px;
+}
+
+.presets button {
+  display: grid;
+  min-height: 76px;
+  align-content: start;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  color: var(--app-text);
+  text-align: left;
+  background: #fbfcfd;
+  cursor: pointer;
+}
+
+.presets button strong {
+  font-size: 12px;
+}
+
+.presets button small {
+  color: var(--app-muted);
+  font-size: 10px;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.presets button:hover {
+  border-color: var(--app-border-strong);
+  background: var(--app-hover);
+}
+
+.presets button[data-selected="true"] {
+  border-color: #8baedc;
+  background: var(--app-blue-soft);
+  box-shadow: inset 3px 0 0 var(--app-blue);
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.settingsGrid > label:not(.check) {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settingsGrid select,
+.settingsGrid input[type="password"] {
+  min-height: 34px;
   padding: 5px 8px;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 5px;
+  color: var(--app-text);
+  background: #fff;
+}
+
+.settingsGrid select:focus-visible,
+.settingsGrid input:focus-visible {
+  outline: 2px solid var(--app-blue);
+  outline-offset: 1px;
+}
+
+.check {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.review {
+  display: grid;
+  margin: 16px 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+}
+
+.review div {
+  display: grid;
+  min-height: 42px;
+  grid-template-columns: minmax(130px, 32%) minmax(0, 1fr);
+  align-items: center;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.review div:last-child {
+  border-bottom: 0;
+}
+
+.review dt,
+.review dd {
+  margin: 0;
+  padding: 9px 12px;
+}
+
+.review dt {
+  align-self: stretch;
+  color: var(--app-muted);
+  font-size: 11px;
+  background: #f6f8fb;
+}
+
+.review dd {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notice,
+.error {
   border-radius: 6px;
   font-size: 12px;
-  color: var(--gray-11);
-  transition: background 0.15s ease;
 }
 
-.fileItem:hover {
-  background: var(--gray-a3);
+.validation {
+  margin: 14px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--app-error);
+  color: var(--app-error);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--app-error-bg);
+  text-wrap: pretty;
 }
 
-.fileItemIcon {
-  color: var(--gray-a8);
-  flex-shrink: 0;
-  display: inline-flex;
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  color: #244f82;
+  background: var(--app-blue-soft);
 }
 
-.fileItemName {
-  flex: 1;
+.notice span {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.fileItemRemove {
-  all: unset;
-  display: inline-flex;
-  align-items: center;
-  color: var(--gray-a7);
-  cursor: default;
-  flex-shrink: 0;
-  padding: 2px;
-  border-radius: 4px;
-  opacity: 0;
-  transition:
-    opacity 0.15s ease,
-    color 0.15s ease;
+.error {
+  padding: 9px 12px;
+  color: var(--app-error);
+  background: var(--app-error-bg);
 }
 
-.fileItem:hover .fileItemRemove {
-  opacity: 1;
+.empty,
+.hint {
+  color: var(--app-muted);
+  font-size: 12px;
+  text-wrap: pretty;
 }
 
-.fileItemRemove:hover {
-  color: var(--red-9);
-  background: var(--red-a3);
-}
+@media (max-width: 700px) {
+  .wizard {
+    padding: 16px;
+  }
 
-.fileItemProcessing {
-  color: var(--accent-9);
-}
+  .presets,
+  .settingsGrid {
+    grid-template-columns: 1fr;
+  }
 
-.dropPrompt {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
-  cursor: default;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--gray-a3);
-}
+  .steps li {
+    justify-content: center;
+  }
 
-.dropPromptText {
-  color: var(--gray-a7);
-  font-size: 11px;
-}
-
-.actionBar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.gearButton:active {
-  transform: scale(0.93);
+  .steps li:not([data-active="true"]) {
+    color: transparent;
+    font-size: 0;
+  }
 }
