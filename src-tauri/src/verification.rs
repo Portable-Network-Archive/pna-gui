@@ -74,6 +74,7 @@ pub struct VerificationReport {
     pub archive_path: PathBuf,
     pub source_size: u64,
     pub source_modified_at: Option<i64>,
+    pub source_sha256: String,
     pub completed_at: i64,
     pub mode: VerificationMode,
     pub conclusion: VerificationConclusion,
@@ -98,6 +99,8 @@ pub struct VerificationSourceStamp {
     pub archive_path: PathBuf,
     pub source_size: u64,
     pub source_modified_at: Option<i64>,
+    #[serde(default)]
+    pub source_sha256: Option<String>,
 }
 
 /// Facts about what a verification run examined. The report's conclusion and
@@ -116,13 +119,18 @@ struct ReportStats {
     content_not_checked: bool,
 }
 
+struct SourceIdentity {
+    size: u64,
+    modified_at: Option<i64>,
+    sha256: String,
+}
+
 impl VerificationReport {
     /// Derives `conclusion`, the status counters, and the bounded check list
     /// from the evidence so they cannot disagree with it.
     fn from_checks(
         request: &VerifyRequest,
-        source_size: u64,
-        source_modified_at: Option<i64>,
+        source: &SourceIdentity,
         stats: ReportStats,
         checks: Vec<VerificationCheck>,
     ) -> Self {
@@ -144,8 +152,9 @@ impl VerificationReport {
         let (checks, checks_omitted) = bound_checks(checks);
         VerificationReport {
             archive_path: request.archive_path.clone(),
-            source_size,
-            source_modified_at,
+            source_size: source.size,
+            source_modified_at: source.modified_at,
+            source_sha256: source.sha256.clone(),
             completed_at: now_seconds(),
             mode: request.mode,
             conclusion,
@@ -178,6 +187,15 @@ pub fn verification_source_matches(
     if !metadata.is_file() || metadata.len() != request.source_size {
         return Ok(Some(false));
     }
+    if let Some(recorded_hash) = request.source_sha256 {
+        // The hash is the strongest signal available and must be
+        // authoritative: an mtime difference does not prove content changed
+        // (e.g. a restore or checkout can touch mtime without changing
+        // bytes), so it must never be used to skip this comparison.
+        return sha256_file(&request.archive_path)
+            .map(|current_hash| Some(current_hash == recorded_hash))
+            .map_err(|error| error.to_string());
+    }
     Ok(
         match (modified_seconds(&metadata), request.source_modified_at) {
             (Some(current), Some(recorded)) => Some(current == recorded),
@@ -207,9 +225,12 @@ where
             "the verification source is not a file",
         ));
     }
-    let source_size = metadata.len();
-    let source_modified_at = modified_seconds(&metadata);
     check_cancelled(&cancelled)?;
+    let source = SourceIdentity {
+        size: metadata.len(),
+        modified_at: modified_seconds(&metadata),
+        sha256: sha256_file_with_cancel(&request.archive_path, &cancelled)?,
+    };
     // Framing around each chunk body: 4-byte length, 4-byte type, 4-byte CRC.
     const CHUNK_FRAMING_BYTES: u64 = 12;
     let mut completed_bytes = PNA_HEADER.len() as u64;
@@ -219,8 +240,7 @@ where
         Err(error) => {
             return Ok(VerificationReport::from_checks(
                 request,
-                source_size,
-                source_modified_at,
+                &source,
                 ReportStats::default(),
                 vec![
                     failed_check(
@@ -251,8 +271,7 @@ where
             Err(error) => {
                 return Ok(VerificationReport::from_checks(
                     request,
-                    source_size,
-                    source_modified_at,
+                    &source,
                     ReportStats::default(),
                     vec![
                         passed_check(VerificationCheckCode::ArchiveHeader),
@@ -295,8 +314,7 @@ where
             Err(error) => {
                 return Ok(VerificationReport::from_checks(
                     request,
-                    source_size,
-                    source_modified_at,
+                    &source,
                     ReportStats {
                         // Enumeration stopped early: the flags observed so far
                         // can prove presence but never absence.
@@ -343,15 +361,18 @@ where
             encrypted,
             solid,
             solid_encrypted,
-            source_size,
-            source_modified_at,
+            source,
         );
     }
 
+    if !source_unchanged_since(&request.archive_path, &source)? {
+        return Err(io::Error::other(
+            "the archive changed while it was being verified",
+        ));
+    }
     Ok(VerificationReport::from_checks(
         request,
-        source_size,
-        source_modified_at,
+        &source,
         ReportStats {
             encrypted: Some(encrypted),
             solid: Some(solid),
@@ -377,8 +398,7 @@ fn complete_verification<C, P>(
     encrypted: bool,
     solid: bool,
     solid_encrypted: bool,
-    source_size: u64,
-    source_modified_at: Option<i64>,
+    source: SourceIdentity,
 ) -> io::Result<VerificationReport>
 where
     C: Fn() -> bool,
@@ -595,10 +615,14 @@ where
         ));
     }
 
+    if !source_unchanged_since(&request.archive_path, &source)? {
+        return Err(io::Error::other(
+            "the archive changed while it was being verified",
+        ));
+    }
     Ok(VerificationReport::from_checks(
         request,
-        source_size,
-        source_modified_at,
+        &source,
         ReportStats {
             encrypted: Some(encrypted),
             solid: Some(solid),
@@ -703,12 +727,48 @@ fn bound_checks(mut checks: Vec<VerificationCheck>) -> (Vec<VerificationCheck>, 
     (checks, omitted)
 }
 
+/// Guards against the archive being replaced or modified between the
+/// upfront hash and the later read passes (header, chunks, entries): each
+/// pass reopens the file independently, so a mutation partway through would
+/// otherwise let the report's SHA-256 describe different bytes than what was
+/// actually checked.
+fn source_unchanged_since(path: &std::path::Path, source: &SourceIdentity) -> io::Result<bool> {
+    let metadata = fs::metadata(path)?;
+    Ok(metadata.len() == source.size
+        && match (modified_seconds(&metadata), source.modified_at) {
+            (Some(current), Some(recorded)) => current == recorded,
+            _ => true,
+        })
+}
+
 fn modified_seconds(metadata: &fs::Metadata) -> Option<i64> {
     metadata
         .modified()
         .ok()
         .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_secs() as i64)
+}
+
+fn sha256_file(path: &std::path::Path) -> io::Result<String> {
+    sha256_file_with_cancel(path, &|| false)
+}
+
+fn sha256_file_with_cancel(
+    path: &std::path::Path,
+    cancelled: &impl Fn() -> bool,
+) -> io::Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        check_cancelled(cancelled)?;
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 fn now_seconds() -> i64 {
@@ -793,6 +853,43 @@ mod tests {
         solid.add_entry(entry.build().unwrap()).unwrap();
         archive.add_entry(solid.build().unwrap()).unwrap();
         archive.finalize().unwrap();
+    }
+
+    #[test]
+    fn verification_rejects_a_report_when_the_archive_changes_mid_run() {
+        // BE-VERIFY-SOURCE-MUTATED-MID-RUN
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("mutated.pna");
+        let file = fs::File::create(&archive_path).unwrap();
+        let mut archive = Archive::write_header(file).unwrap();
+        let mut entry =
+            EntryBuilder::new_file(EntryName::from("readme.txt"), WriteOptions::store()).unwrap();
+        entry.write_all(b"verified payload").unwrap();
+        archive.add_entry(entry.build().unwrap()).unwrap();
+        archive.finalize().unwrap();
+
+        let error = verify_archive(
+            &VerifyRequest {
+                archive_path: archive_path.clone(),
+                password: None,
+                mode: VerificationMode::Quick,
+            },
+            || false,
+            |_, _, _| {
+                // Simulates an external process replacing the archive after
+                // its SHA-256 was recorded but before this pass finishes.
+                let mut file = fs::OpenOptions::new()
+                    .append(true)
+                    .open(&archive_path)
+                    .unwrap();
+                file.write_all(b"appended after hashing").unwrap();
+            },
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("changed while it was being verified"));
     }
 
     #[test]
@@ -1484,6 +1581,7 @@ mod tests {
             archive_path: archive_path.clone(),
             source_size: metadata.len(),
             source_modified_at: modified_seconds(&metadata),
+            source_sha256: None,
         };
 
         assert_eq!(
@@ -1511,10 +1609,45 @@ mod tests {
             archive_path: archive_path.clone(),
             source_size: metadata.len(),
             source_modified_at: None,
+            source_sha256: None,
         })
         .unwrap();
 
         assert_eq!(matches, None);
+    }
+
+    #[test]
+    fn verification_source_hash_detects_a_same_size_same_stamp_replacement() {
+        // BE-REPORT-SOURCE-HASH-FRESHNESS
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("hash-stamped.pna");
+        fs::write(&archive_path, b"version one").unwrap();
+        let metadata = fs::metadata(&archive_path).unwrap();
+        let request = VerificationSourceStamp {
+            archive_path: archive_path.clone(),
+            source_size: metadata.len(),
+            source_modified_at: modified_seconds(&metadata),
+            source_sha256: Some(sha256_file(&archive_path).unwrap()),
+        };
+        fs::write(&archive_path, b"version two").unwrap();
+
+        assert_eq!(verification_source_matches(request).unwrap(), Some(false));
+    }
+
+    #[test]
+    fn verification_source_hash_confirms_an_untouched_archive() {
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("hash-stamped-untouched.pna");
+        fs::write(&archive_path, b"version one").unwrap();
+        let metadata = fs::metadata(&archive_path).unwrap();
+        let request = VerificationSourceStamp {
+            archive_path: archive_path.clone(),
+            source_size: metadata.len(),
+            source_modified_at: modified_seconds(&metadata),
+            source_sha256: Some(sha256_file(&archive_path).unwrap()),
+        };
+
+        assert_eq!(verification_source_matches(request).unwrap(), Some(true));
     }
 
     #[test]

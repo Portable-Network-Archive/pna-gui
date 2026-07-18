@@ -106,6 +106,46 @@
   font-size: 11px;
 }
 
+.exportResult {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-a5);
+  border-radius: 8px;
+  background: var(--gray-a2);
+}
+
+.exportResult span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.exportError {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  color: var(--red-11);
+  overflow-wrap: anywhere;
+}
+
+.exportError details {
+  color: var(--gray-11);
+  font-size: 11px;
+}
+
+.exportError summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.exportError small {
+  display: block;
+  margin-top: 4px;
+}
+
 .checks li {
   display: grid;
   grid-template-columns: 90px minmax(0, 1fr);

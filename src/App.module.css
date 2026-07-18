@@ -1134,13 +1134,22 @@
     display: none;
   }
 
-  .toolbarLabel {
+  .toolbarLabelSecondary {
     display: none;
   }
 
   .toolbarButton {
+    width: auto;
+    padding: 0 9px;
+  }
+
+  .toolbarButtonSecondary {
     width: 36px;
     padding: 0;
+  }
+
+  .searchBox {
+    width: min(240px, 28vw);
   }
 
   .listPanel .table th:nth-child(n + 5),

@@ -1,6 +1,13 @@
 "use client";
 
-import { KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -39,6 +46,7 @@ import {
 import { Create } from "./tabs";
 import { registerE2eBridge } from "@pna/e2e-bridge";
 import { archiveApi, normalizeAppError } from "./features/archive/api";
+import { createSingleFlightGate } from "./features/singleFlight";
 import { ArchiveTreeRow, FolderGlyph } from "./features/archive/ArchiveTreeRow";
 import {
   formatAttributeCount,
@@ -110,14 +118,18 @@ function AppContent() {
   const [passwordPath, setPasswordPath] = useState<string>();
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string>();
-  const [verificationReport, setVerificationReport] =
-    useState<VerificationReport>();
+  const [verificationResult, setVerificationResult] = useState<{
+    jobId: string;
+    report: VerificationReport;
+  }>();
   const openingRef = useRef(false);
   const cliSourceHandledRef = useRef(false);
   const activeArchiveRef = useRef<ActiveArchiveSession | undefined>(undefined);
   const pendingRefreshRef = useRef<
     { path: string; password?: string } | undefined
   >(undefined);
+  const pickerGate = useMemo(createSingleFlightGate, []);
+  const recentActionGate = useMemo(createSingleFlightGate, []);
 
   const refreshBootstrap = useCallback(async () => {
     try {
@@ -180,28 +192,43 @@ function AppContent() {
     [refreshBootstrap, t],
   );
 
-  const chooseArchive = useCallback(async () => {
-    try {
-      const selected = await openDialog({
-        title: t("openArchiveTitle"),
-        multiple: false,
-        filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
-      });
-      if (typeof selected === "string") await openArchivePath(selected);
-    } catch (caught) {
-      setError(normalizeAppError(caught));
-    }
-  }, [openArchivePath, t]);
+  const chooseArchive = useCallback(
+    () =>
+      pickerGate.run("archive-picker", async () => {
+        try {
+          const selected = await openDialog({
+            title: t("openArchiveTitle"),
+            multiple: false,
+            filters: [
+              { name: "Portable Network Archive", extensions: ["pna"] },
+            ],
+          });
+          if (typeof selected === "string") await openArchivePath(selected);
+        } catch (caught) {
+          setError(normalizeAppError(caught));
+        }
+      }),
+    [openArchivePath, pickerGate, t],
+  );
 
   const goHome = useCallback(async () => {
+    let closeError: AppErrorDto | undefined;
     if (openArchive) {
-      await archiveApi.close(openArchive.handle).catch(() => undefined);
+      try {
+        await archiveApi.close(openArchive.handle);
+      } catch (caught) {
+        const normalized = normalizeAppError(caught);
+        closeError =
+          normalized.code === "INTERNAL_ERROR"
+            ? normalized
+            : { ...normalized, context: openArchive.summary.path };
+      }
     }
     activeArchiveRef.current = undefined;
     pendingRefreshRef.current = undefined;
     setOpenArchive(undefined);
     setView("home");
-    setError(undefined);
+    setError(closeError);
   }, [openArchive]);
 
   useEffect(() => {
@@ -234,7 +261,9 @@ function AppContent() {
         },
       );
       cleanups = [unlistenDrop, unlistenMenu];
-    })();
+    })().catch((caught) => {
+      if (!disposed) setError(normalizeAppError(caught));
+    });
     if (!cliSourceHandledRef.current) {
       cliSourceHandledRef.current = true;
       void getMatches()
@@ -248,7 +277,9 @@ function AppContent() {
                 : null;
           if (path) return openArchivePath(path);
         })
-        .catch(() => undefined);
+        .catch((caught) => {
+          if (!disposed) setError(normalizeAppError(caught));
+        });
     }
     return () => {
       disposed = true;
@@ -297,7 +328,9 @@ function AppContent() {
           }
         },
       );
-    })();
+    })().catch((caught) => {
+      if (!disposed) setError(normalizeAppError(caught));
+    });
     return () => {
       disposed = true;
       unlisten?.();
@@ -320,14 +353,15 @@ function AppContent() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [chooseArchive]);
 
-  const removeRecent = async (path: string) => {
-    try {
-      const recent = await archiveApi.removeRecent(path);
-      setBootstrap((current) => ({ ...current, recent }));
-    } catch (caught) {
-      setError(normalizeAppError(caught));
-    }
-  };
+  const removeRecent = (path: string) =>
+    recentActionGate.run(`remove-recent:${path}`, async () => {
+      try {
+        const recent = await archiveApi.removeRecent(path);
+        setBootstrap((current) => ({ ...current, recent }));
+      } catch (caught) {
+        setError(normalizeAppError(caught));
+      }
+    });
 
   return (
     <div className={styles.root}>
@@ -454,14 +488,17 @@ function AppContent() {
       <JobDrawer
         onOpenArchive={openArchivePath}
         onCreatedArchive={refreshBootstrap}
-        onViewVerification={setVerificationReport}
+        onViewVerification={(jobId, report) =>
+          setVerificationResult({ jobId, report })
+        }
       />
-      {verificationReport && (
+      {verificationResult && (
         <VerificationResultsDialog
           open
-          report={verificationReport}
+          jobId={verificationResult.jobId}
+          report={verificationResult.report}
           onOpenChange={(open) => {
-            if (!open) setVerificationReport(undefined);
+            if (!open) setVerificationResult(undefined);
           }}
         />
       )}
@@ -899,23 +936,31 @@ function BrowserView({
           <span className={styles.toolbarLabel}>{t("extract")}</span>
         </button>
         <button
-          className={styles.toolbarButton}
+          className={`${styles.toolbarButton} ${styles.toolbarButtonPersistent}`}
           aria-label={t("verifyArchive")}
           title={t("verifyArchive")}
           onClick={() => setVerificationOpen(true)}
         >
           <CheckCircledIcon aria-hidden="true" />
-          <span className={styles.toolbarLabel}>{t("verifyArchive")}</span>
+          <span
+            className={`${styles.toolbarLabel} ${styles.toolbarLabelPersistent}`}
+          >
+            {t("verifyArchive")}
+          </span>
         </button>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
             <button
-              className={styles.toolbarButton}
+              className={`${styles.toolbarButton} ${styles.toolbarButtonSecondary}`}
               aria-label={t("more")}
               title={t("more")}
             >
               <DotsHorizontalIcon aria-hidden="true" />
-              <span className={styles.toolbarLabel}>{t("more")}</span>
+              <span
+                className={`${styles.toolbarLabel} ${styles.toolbarLabelSecondary}`}
+              >
+                {t("more")}
+              </span>
             </button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="start">
@@ -1276,12 +1321,7 @@ function BrowserView({
                 {renameValidationError}
               </p>
             )}
-            {editError && (
-              <div className={styles.formError} role="alert">
-                <strong>{editError.message}</strong>
-                {editError.userAction && <span>{editError.userAction}</span>}
-              </div>
-            )}
+            {editError && <FormError error={editError} />}
           </div>
           <Flex mt="5" gap="3" justify="end">
             <Button
@@ -1298,6 +1338,7 @@ function BrowserView({
                 editSubmitting ||
                 (editPasswordRequired && !editPassword)
               }
+              aria-busy={editSubmitting}
               onClick={async () => {
                 if (!details) return;
                 setEditSubmitting(true);
@@ -1323,7 +1364,8 @@ function BrowserView({
                 }
               }}
             >
-              {t("renameItem")}
+              {editSubmitting && <Spinner size="1" />}
+              {editSubmitting ? t("startingOperation") : t("renameItem")}
             </Button>
           </Flex>
         </Dialog.Content>
@@ -1358,12 +1400,7 @@ function BrowserView({
               />
             </label>
           )}
-          {editError && (
-            <div className={styles.formError} role="alert">
-              <strong>{editError.message}</strong>
-              {editError.userAction && <span>{editError.userAction}</span>}
-            </div>
-          )}
+          {editError && <FormError error={editError} />}
           <Flex mt="5" gap="3" justify="end">
             <AlertDialog.Cancel>
               <Button variant="soft" color="gray">
@@ -1378,6 +1415,7 @@ function BrowserView({
                   editSubmitting ||
                   (editPasswordRequired && !editPassword)
                 }
+                aria-busy={editSubmitting}
                 onClick={async (event) => {
                   event.preventDefault();
                   if (!details) return;
@@ -1397,7 +1435,10 @@ function BrowserView({
                   }
                 }}
               >
-                {t("deleteFromArchive")}
+                {editSubmitting && <Spinner size="1" />}
+                {editSubmitting
+                  ? t("startingOperation")
+                  : t("deleteFromArchive")}
               </Button>
             </AlertDialog.Action>
           </Flex>
@@ -1436,53 +1477,60 @@ function ArchiveToolsDialog({
   const [keepPrivateChunks, setKeepPrivateChunks] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<AppErrorDto>();
+  const pickerGate = useMemo(createSingleFlightGate, []);
   const encrypted = archive.summary.encryptionMethods.some(
     (method) => method.toLowerCase() !== "none",
   );
 
-  const chooseTarget = async () => {
-    setSubmitError(undefined);
-    try {
-      if (operation === "split") {
-        const selected = await openDialog({
-          directory: true,
-          multiple: false,
-          title: t("chooseSplitDestination"),
-        });
-        if (typeof selected === "string") setOutput(selected);
-      } else if (operation === "concat") {
-        const selected = await openDialog({
-          multiple: false,
-          filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
-        });
-        if (typeof selected === "string") setParts([selected]);
-      } else {
-        const selected = await saveDialog({
-          defaultPath: archive.summary.path.replace(
-            /\.pna$/i,
-            `-${operation}.pna`,
-          ),
-          filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
-        });
-        if (typeof selected === "string") setOutput(selected);
+  const chooseTarget = () =>
+    pickerGate.run("archive-tool-picker", async () => {
+      setSubmitError(undefined);
+      try {
+        if (operation === "split") {
+          const selected = await openDialog({
+            directory: true,
+            multiple: false,
+            title: t("chooseSplitDestination"),
+          });
+          if (typeof selected === "string") setOutput(selected);
+        } else if (operation === "concat") {
+          const selected = await openDialog({
+            multiple: false,
+            filters: [
+              { name: "Portable Network Archive", extensions: ["pna"] },
+            ],
+          });
+          if (typeof selected === "string") setParts([selected]);
+        } else {
+          const selected = await saveDialog({
+            defaultPath: archive.summary.path.replace(
+              /\.pna$/i,
+              `-${operation}.pna`,
+            ),
+            filters: [
+              { name: "Portable Network Archive", extensions: ["pna"] },
+            ],
+          });
+          if (typeof selected === "string") setOutput(selected);
+        }
+      } catch (caught) {
+        setSubmitError(normalizeAppError(caught));
       }
-    } catch (caught) {
-      setSubmitError(normalizeAppError(caught));
-    }
-  };
+    });
 
-  const chooseConcatOutput = async () => {
-    setSubmitError(undefined);
-    try {
-      const selected = await saveDialog({
-        defaultPath: archive.summary.path.replace(/\.part\d+\.pna$/i, ".pna"),
-        filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
-      });
-      if (typeof selected === "string") setOutput(selected);
-    } catch (caught) {
-      setSubmitError(normalizeAppError(caught));
-    }
-  };
+  const chooseConcatOutput = () =>
+    pickerGate.run("archive-tool-picker", async () => {
+      setSubmitError(undefined);
+      try {
+        const selected = await saveDialog({
+          defaultPath: archive.summary.path.replace(/\.part\d+\.pna$/i, ".pna"),
+          filters: [{ name: "Portable Network Archive", extensions: ["pna"] }],
+        });
+        if (typeof selected === "string") setOutput(selected);
+      } catch (caught) {
+        setSubmitError(normalizeAppError(caught));
+      }
+    });
 
   const start = async () => {
     setSubmitError(undefined);
@@ -1692,12 +1740,7 @@ function ArchiveToolsDialog({
               />
             </label>
           )}
-          {submitError && (
-            <div className={styles.formError} role="alert">
-              <strong>{submitError.message}</strong>
-              {submitError.userAction && <span>{submitError.userAction}</span>}
-            </div>
-          )}
+          {submitError && <FormError error={submitError} />}
         </div>
         <Flex mt="5" gap="3" justify="end">
           <Button
@@ -1716,9 +1759,11 @@ function ArchiveToolsDialog({
                 ["sort", "strip", "migrate"].includes(operation) &&
                 !password)
             }
+            aria-busy={submitting}
             onClick={start}
           >
-            {t("start")}
+            {submitting && <Spinner size="1" />}
+            {submitting ? t("startingOperation") : t("start")}
           </Button>
         </Flex>
       </Dialog.Content>
@@ -1740,6 +1785,7 @@ function AppendDialog({
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<AppErrorDto>();
+  const pickerGate = useMemo(createSingleFlightGate, []);
   const encryption = archive.summary.encryptionMethods.some((method) =>
     method.toLowerCase().includes("camellia"),
   )
@@ -1751,25 +1797,33 @@ function AppendDialog({
       : "none";
   const passwordRequired = encryption !== "none";
 
-  const chooseFiles = async () => {
-    setSubmitError(undefined);
-    try {
-      const selected = await openDialog({ multiple: true, directory: false });
-      if (Array.isArray(selected)) setSources(selected);
-      else if (typeof selected === "string") setSources([selected]);
-    } catch (caught) {
-      setSubmitError(normalizeAppError(caught));
-    }
-  };
-  const chooseFolder = async () => {
-    setSubmitError(undefined);
-    try {
-      const selected = await openDialog({ multiple: false, directory: true });
-      if (typeof selected === "string") setSources([selected]);
-    } catch (caught) {
-      setSubmitError(normalizeAppError(caught));
-    }
-  };
+  const chooseFiles = () =>
+    pickerGate.run("append-picker", async () => {
+      setSubmitError(undefined);
+      try {
+        const selected = await openDialog({
+          multiple: true,
+          directory: false,
+        });
+        if (Array.isArray(selected)) setSources(selected);
+        else if (typeof selected === "string") setSources([selected]);
+      } catch (caught) {
+        setSubmitError(normalizeAppError(caught));
+      }
+    });
+  const chooseFolder = () =>
+    pickerGate.run("append-picker", async () => {
+      setSubmitError(undefined);
+      try {
+        const selected = await openDialog({
+          multiple: false,
+          directory: true,
+        });
+        if (typeof selected === "string") setSources([selected]);
+      } catch (caught) {
+        setSubmitError(normalizeAppError(caught));
+      }
+    });
   const start = async () => {
     setSubmitError(undefined);
     setSubmitting(true);
@@ -1837,12 +1891,7 @@ function AppendDialog({
               />
             </label>
           )}
-          {submitError && (
-            <div className={styles.formError} role="alert">
-              <strong>{submitError.message}</strong>
-              {submitError.userAction && <span>{submitError.userAction}</span>}
-            </div>
-          )}
+          {submitError && <FormError error={submitError} />}
         </div>
         <Flex mt="5" gap="3" justify="end">
           <Button
@@ -1890,6 +1939,7 @@ function ExtractDialog({
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<AppErrorDto>();
+  const pickerGate = useMemo(createSingleFlightGate, []);
   const encrypted = archive.summary.encryptionMethods.some(
     (method) => method.toLowerCase() !== "none",
   );
@@ -1910,19 +1960,20 @@ function ExtractDialog({
     if (open) setSelectedOnly(Boolean(selectedPath));
   }, [open, selectedPath]);
 
-  const chooseDestination = async () => {
-    setSubmitError(undefined);
-    try {
-      const selected = await openDialog({
-        directory: true,
-        multiple: false,
-        title: t("chooseDestination"),
-      });
-      if (typeof selected === "string") setDestination(selected);
-    } catch (caught) {
-      setSubmitError(normalizeAppError(caught));
-    }
-  };
+  const chooseDestination = () =>
+    pickerGate.run("extract-picker", async () => {
+      setSubmitError(undefined);
+      try {
+        const selected = await openDialog({
+          directory: true,
+          multiple: false,
+          title: t("chooseDestination"),
+        });
+        if (typeof selected === "string") setDestination(selected);
+      } catch (caught) {
+        setSubmitError(normalizeAppError(caught));
+      }
+    });
 
   const start = async () => {
     setSubmitError(undefined);
@@ -2027,12 +2078,7 @@ function ExtractDialog({
               />
             </label>
           )}
-          {submitError && (
-            <div className={styles.formError} role="alert">
-              <strong>{submitError.message}</strong>
-              {submitError.userAction && <span>{submitError.userAction}</span>}
-            </div>
-          )}
+          {submitError && <FormError error={submitError} />}
           <p id="extract-readiness" className={styles.extractReadiness}>
             {readiness}
           </p>
@@ -2062,6 +2108,22 @@ function ExtractDialog({
         </Flex>
       </Dialog.Content>
     </Dialog.Root>
+  );
+}
+
+function FormError({ error }: { error: AppErrorDto }) {
+  const { t } = useI18n();
+  return (
+    <div className={styles.formError} role="alert">
+      <strong>{error.message}</strong>
+      {error.userAction && <span>{error.userAction}</span>}
+      {error.context && (
+        <details>
+          <summary>{t("verificationTechnicalDetail")}</summary>
+          <small>{error.context}</small>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -2116,9 +2178,15 @@ function ErrorBanner({
     <div className={styles.errorBanner} role="alert">
       <div>
         <strong>{localized.message}</strong>
-        {error.context && (
-          <span className={styles.errorContext}>{error.context}</span>
-        )}
+        {error.context &&
+          (error.code === "INTERNAL_ERROR" ? (
+            <details>
+              <summary>{t("verificationTechnicalDetail")}</summary>
+              <small className={styles.errorContext}>{error.context}</small>
+            </details>
+          ) : (
+            <span className={styles.errorContext}>{error.context}</span>
+          ))}
         {localized.userAction && <span>{localized.userAction}</span>}
       </div>
       {error.context && onChooseAnother && (

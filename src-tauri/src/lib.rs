@@ -3,6 +3,7 @@
 mod jobs;
 mod operations;
 mod reader;
+mod reports;
 mod utils;
 mod verification;
 
@@ -111,6 +112,17 @@ start_job_command!(
 );
 start_job_command!(job_start_migrate, operations::MigrateRequest, Migrate);
 start_job_command!(job_start_verify, verification::VerifyRequest, Verify);
+
+#[tauri::command]
+fn report_export_verification(
+    jobs: State<'_, jobs::JobManager>,
+    request: reports::VerificationReportExportRequest,
+) -> Result<reports::VerificationReportExportResult, reports::VerificationReportExportError> {
+    let report = jobs.verification_report(&request.job_id).map_err(|error| {
+        reports::VerificationReportExportError::job_unavailable(error.to_string())
+    })?;
+    reports::export_verification_report(report, request.format, request.locale, request.directory)
+}
 
 #[tauri::command]
 fn job_list(jobs: State<'_, jobs::JobManager>) -> Vec<jobs::JobSnapshot> {
@@ -574,7 +586,9 @@ pub fn run() {
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             app.manage(reader::ReaderState::new(app_data_dir.join("recent.json")));
-            app.manage(jobs::JobManager::default());
+            app.manage(jobs::JobManager::persistent(
+                app_data_dir.join("verification-reports.json"),
+            ));
 
             // --- Window Menu Bar (matching v1 Menu::os_default layout) ---
             let update_check = MenuItem::with_id(
@@ -739,6 +753,8 @@ pub fn run() {
             job_start_migrate,
             job_start_verify,
             verification::verification_source_matches,
+            report_export_verification,
+            reports::report_reveal_export,
             job_list,
             job_cancel,
             job_retry,

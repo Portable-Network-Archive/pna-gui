@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Dialog, Flex, Spinner } from "@radix-ui/themes";
 import { useI18n } from "../i18n";
 import { jobApi, type VerificationMode } from "../jobs/api";
@@ -27,7 +27,8 @@ export default function VerificationDialog({
   const [mode, setMode] = useState<VerificationMode>("quick");
   const [password, setPassword] = useState(sessionPassword ?? "");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string>();
+  const submissionInFlight = useRef(false);
+  const [error, setError] = useState<{ summary: string; detail?: string }>();
   const passwordRequired = mode === "complete" && encrypted;
   const normalizedPath = archivePath.replaceAll("\\", "/");
   const lastSlashIndex = normalizedPath.lastIndexOf("/");
@@ -41,10 +42,13 @@ export default function VerificationDialog({
     setMode("quick");
     setPassword(sessionPassword ?? "");
     setSubmitting(false);
+    submissionInFlight.current = false;
     setError(undefined);
   }, [open, sessionPassword]);
 
   const submit = async () => {
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -55,8 +59,12 @@ export default function VerificationDialog({
       });
       onOpenChange(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError({
+        summary: t("jobOperationFailed"),
+        detail: caught instanceof Error ? caught.message : String(caught),
+      });
     } finally {
+      submissionInFlight.current = false;
       setSubmitting(false);
     }
   };
@@ -130,9 +138,15 @@ export default function VerificationDialog({
             </label>
           )}
           {error && (
-            <p className={styles.error} role="alert">
-              {error}
-            </p>
+            <div className={styles.error} role="alert">
+              <span>{error.summary}</span>
+              {error.detail && (
+                <details>
+                  <summary>{t("verificationTechnicalDetail")}</summary>
+                  <small>{error.detail}</small>
+                </details>
+              )}
+            </div>
           )}
           <Flex gap="3" mt="5" justify="end">
             <Dialog.Close>

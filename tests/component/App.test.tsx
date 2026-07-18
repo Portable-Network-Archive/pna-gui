@@ -271,6 +271,8 @@ describe("application shell", () => {
         archivePath: recent.path,
         sourceSize: 2048,
         sourceModifiedAt: 1_700_000_000,
+        sourceSha256:
+          "f1a5a48b3b1f91208b982163be46f3a865f157989a4a195c6806144c4f8f23ac",
         completedAt: 1_700_000_010,
         mode: "quick",
         conclusion: "passed",
@@ -335,6 +337,73 @@ describe("application shell", () => {
     });
   });
 
+  it("[UI-RECENT-REMOVE-SINGLE-FLIGHT] issues one removal while the first request is pending", async () => {
+    await renderHome([recent]);
+    const originalInvoke = bridge.invoke.getMockImplementation()!;
+    let resolveRemoval!: (items: ArchiveRecent[]) => void;
+    bridge.invoke.mockImplementation(
+      (command: string, args?: Record<string, unknown>) => {
+        if (command === "recent_remove") {
+          return new Promise((resolve) => {
+            resolveRemoval = resolve;
+          });
+        }
+        return originalInvoke(command, args);
+      },
+    );
+    await userEvent.click(screen.getByRole("row", { name: /demo\.pna/ }));
+    const remove = within(screen.getByLabelText("Selected archive")).getByRole(
+      "button",
+      { name: "Remove from Recents" },
+    );
+
+    await userEvent.dblClick(remove);
+
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) => command === "recent_remove",
+      ),
+    ).toHaveLength(1);
+    await act(async () => resolveRemoval([]));
+  });
+
+  it("[UI-PICKER-OPEN-ERROR] presents a native picker failure without exposing raw text by default", async () => {
+    await renderHome([recent]);
+    bridge.openDialog.mockRejectedValueOnce(
+      new Error("archive picker unavailable"),
+    );
+
+    await userEvent.click(
+      screen.getAllByRole("button", { name: /Open archive/ })[0],
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The operation could not be completed.");
+    expect(
+      within(alert).getByText("archive picker unavailable"),
+    ).not.toBeVisible();
+    await userEvent.click(within(alert).getByText("Technical details"));
+    expect(within(alert).getByText("archive picker unavailable")).toBeVisible();
+  });
+
+  it("[UI-CLI-ARGUMENT-ERROR] reports startup argument bridge failure without exposing raw text by default", async () => {
+    bridge.getMatches.mockRejectedValueOnce(
+      new Error("command line bridge unavailable"),
+    );
+
+    await renderHome();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The operation could not be completed.");
+    expect(
+      within(alert).getByText("command line bridge unavailable"),
+    ).not.toBeVisible();
+    await userEvent.click(within(alert).getByText("Technical details"));
+    expect(
+      within(alert).getByText("command line bridge unavailable"),
+    ).toBeVisible();
+  });
+
   it("[UI-UX-HOME-ROW-KEYBOARD] opens a recent archive from its single primary keyboard stop", async () => {
     await renderHome([recent]);
     const row = screen.getByRole("row", { name: /demo\.pna/ });
@@ -361,6 +430,33 @@ describe("application shell", () => {
     expect(row).not.toHaveTextContent("NaN");
     expect(row).not.toHaveTextContent("1970");
     expect(within(row).getAllByText("—")).toHaveLength(5);
+  });
+
+  it("[UI-SESSION-CLOSE-ERROR] returns home and preserves a close failure as collapsed technical evidence", async () => {
+    await openRecentArchive();
+    const originalInvoke = bridge.invoke.getMockImplementation()!;
+    bridge.invoke.mockImplementation(
+      (command: string, args?: Record<string, unknown>) => {
+        if (command === "archive_close")
+          return Promise.reject(new Error("archive handle close failed"));
+        return originalInvoke(command, args);
+      },
+    );
+
+    await userEvent.click(screen.getByTestId("archive-home"));
+
+    expect(
+      await screen.findByRole("heading", { name: "Recent archives" }),
+    ).toBeVisible();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("The operation could not be completed.");
+    expect(
+      within(alert).getByText("archive handle close failed"),
+    ).not.toBeVisible();
+    await userEvent.click(within(alert).getByText("Technical details"));
+    expect(
+      within(alert).getByText("archive handle close failed"),
+    ).toBeVisible();
   });
 
   it("[UI-UPDATE-APPEND-FLOW] adds selected files to the open archive as a background job", async () => {
@@ -407,8 +503,11 @@ describe("application shell", () => {
     );
 
     expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      "file picker unavailable",
+      "The operation could not be completed.",
     );
+    expect(
+      within(dialog).getByText("file picker unavailable"),
+    ).not.toBeVisible();
   });
 
   it("[UI-UPDATE-APPEND-ERROR-RECOVERY] retains selected sources when job submission fails", async () => {
@@ -432,7 +531,7 @@ describe("application shell", () => {
     ).toBeVisible();
     expect(within(dialog).getByText("/tmp/new.txt")).toBeVisible();
     expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      "job queue is unavailable",
+      "The operation could not be completed.",
     );
   });
 
@@ -580,7 +679,9 @@ describe("application shell", () => {
       screen.getByRole("alertdialog", { name: "Delete from archive?" }),
     ).toBeVisible();
     expect(within(dialog).getByText("src")).toBeVisible();
-    expect(await screen.findByText("job storage is unavailable")).toBeVisible();
+    expect(
+      await screen.findByText("The operation could not be completed."),
+    ).toBeVisible();
   });
 
   it("[UI-VOLUME-SPLIT-FLOW] explains and starts split output with an explicit destination", async () => {
@@ -735,7 +836,7 @@ describe("application shell", () => {
     );
 
     expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      "save picker unavailable",
+      "The operation could not be completed.",
     );
   });
 
@@ -912,7 +1013,7 @@ describe("application shell", () => {
     expect(screen.getByRole("dialog", { name: "Archive tools" })).toBeVisible();
     expect(within(dialog).getByText("/tmp/demo-sorted.pna")).toBeVisible();
     expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      "output is read-only",
+      "The operation could not be completed.",
     );
     expect(within(dialog).getByLabelText("Operation")).toHaveValue("sort");
   });
@@ -1186,7 +1287,7 @@ describe("application shell", () => {
     );
 
     expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      "destination picker unavailable",
+      "The operation could not be completed.",
     );
   });
 

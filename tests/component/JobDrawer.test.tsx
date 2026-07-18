@@ -87,9 +87,86 @@ describe("background job drawer", () => {
         payload: { ...running, status: "failed", error: "disk full" },
       }),
     );
-    expect(await screen.findByText("disk full")).toBeVisible();
+    expect(
+      await screen.findByText("The operation could not be completed."),
+    ).toBeVisible();
+    expect(screen.getByText("disk full")).not.toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Retry job" }));
     expect(bridge.invoke).toHaveBeenCalledWith("job_retry", { jobId: "job-1" });
+  });
+
+  it("[UI-JOB-TERMINAL-ANNOUNCEMENT] announces a completed job from an always-mounted status region", async () => {
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+    await screen.findByRole("region", { name: "Background jobs" });
+    const announcer = screen.getByTestId("job-announcer");
+    expect(announcer).toHaveTextContent("");
+
+    act(() => bridge.jobHandler?.({ payload: completed }));
+
+    expect(announcer).toHaveTextContent("Archive creation: Completed");
+  });
+
+  it("[UI-REPORT-PERSISTENCE-FAILURE] explains that a completed result will not survive restart", async () => {
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") {
+        return [
+          {
+            ...completed,
+            errorCode: "VERIFICATION_REPORT_NOT_PERSISTED",
+          },
+        ];
+      }
+      return completed;
+    });
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+
+    expect(
+      await screen.findByText(
+        "The verification completed, but this result will not be available after the app restarts. Save a report before closing the app.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("[UI-JOB-RESTART-RECONCILED] explains a restored interruption without offering an impossible retry", async () => {
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") {
+        return [
+          {
+            ...running,
+            status: "interrupted",
+            errorCode: "APP_RESTARTED",
+            error: "the application closed before the job completed",
+            retryable: false,
+          },
+        ];
+      }
+      return running;
+    });
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+
+    expect(
+      await screen.findByText(
+        "The app closed before this job finished. Start the operation again from its original screen if it is still needed.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Retry job" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("the application closed before the job completed"),
+    ).not.toBeVisible();
   });
 
   it("[UI-P2-JOB-CENTER] expands the durable job list and filters failures", async () => {
@@ -103,6 +180,11 @@ describe("background job drawer", () => {
     );
     const dialog = screen.getByRole("dialog", { name: "Job center" });
     expect(dialog).toBeVisible();
+    expect(
+      within(dialog).getByText(
+        "Review progress, saved results, and available actions.",
+      ),
+    ).toBeVisible();
     expect(within(dialog).getByText("docs/readme.txt")).toBeVisible();
   });
 
@@ -150,7 +232,7 @@ describe("background job drawer", () => {
     expect(within(bar).queryByText("source/input.txt")).not.toBeInTheDocument();
 
     await userEvent.click(
-      within(bar).getByRole("button", { name: "Show in Folder" }),
+      within(bar).getByRole("button", { name: "Open containing folder" }),
     );
     expect(bridge.invoke).toHaveBeenCalledWith("job_reveal_output", {
       jobId: "job-1",
@@ -182,7 +264,7 @@ describe("background job drawer", () => {
 
     const bar = await screen.findByRole("region", { name: "Background jobs" });
     expect(
-      within(bar).getByRole("button", { name: "Show in Folder" }),
+      within(bar).getByRole("button", { name: "Open containing folder" }),
     ).toBeVisible();
     expect(
       within(bar).queryByRole("button", { name: "Open Output Archive" }),
@@ -199,6 +281,8 @@ describe("background job drawer", () => {
         archivePath: "/output/archive.pna",
         sourceSize: 4096,
         sourceModifiedAt: 1784160000,
+        sourceSha256:
+          "f1a5a48b3b1f91208b982163be46f3a865f157989a4a195c6806144c4f8f23ac",
         completedAt: 1784160300,
         mode: "quick" as const,
         conclusion: "passed" as const,
@@ -235,8 +319,98 @@ describe("background job drawer", () => {
       within(bar).getByRole("button", { name: "View results" }),
     );
     expect(onViewVerification).toHaveBeenCalledWith(
+      verification.id,
       verification.verificationReport,
     );
+  });
+
+  it("[UI-VERIFY-RESULT-DISMISS-WARNING] does not delete an unexported verification result without explicit confirmation", async () => {
+    const verification = {
+      ...completed,
+      kind: "verify" as const,
+      outputPath: null,
+      verificationReport: {
+        archivePath: "/output/archive.pna",
+        sourceSize: 4096,
+        sourceModifiedAt: 1784160000,
+        sourceSha256:
+          "f1a5a48b3b1f91208b982163be46f3a865f157989a4a195c6806144c4f8f23ac",
+        completedAt: 1784160300,
+        mode: "quick" as const,
+        conclusion: "passed" as const,
+        encrypted: false,
+        solid: false,
+        entriesChecked: 4,
+        filesChecked: 0,
+        bytesChecked: 0,
+        failedChecks: 0,
+        notCheckedChecks: 1,
+        checksOmitted: 0,
+        checks: [],
+      },
+    } satisfies JobSnapshot;
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") return [verification];
+      return verification;
+    });
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Delete saved verification result",
+      }),
+    );
+    expect(
+      screen.getByRole("alertdialog", {
+        name: "Delete verification result?",
+      }),
+    ).toHaveTextContent(
+      "Delete this verification result? It will no longer be available to view or export.",
+    );
+    expect(bridge.invoke).not.toHaveBeenCalledWith("job_dismiss", {
+      jobId: verification.id,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.queryByRole("alertdialog", {
+        name: "Delete verification result?",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("[UI-JOB-DIAGNOSTIC-DISMISS-WARNING] confirms before removing failure and retry evidence", async () => {
+    const failed = {
+      ...completed,
+      status: "failed" as const,
+      errorCode: "OPERATION_FAILED",
+      error: "low-level failure",
+      retryable: true,
+    };
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") return [failed];
+      return [];
+    });
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Dismiss completed job" }),
+    );
+    expect(
+      screen.getByRole("alertdialog", { name: "Remove job history?" }),
+    ).toHaveTextContent(
+      "This removes saved results, error details, and retry entries from the Job Center. It does not delete output files.",
+    );
+    expect(bridge.invoke).not.toHaveBeenCalledWith("job_dismiss", {
+      jobId: failed.id,
+    });
   });
 
   it("[UI-VERIFY-JOB-ISSUES] signals a verification that found issues instead of a generic success", async () => {
@@ -248,6 +422,8 @@ describe("background job drawer", () => {
         archivePath: "/output/archive.pna",
         sourceSize: 4096,
         sourceModifiedAt: 1784160000,
+        sourceSha256:
+          "f1a5a48b3b1f91208b982163be46f3a865f157989a4a195c6806144c4f8f23ac",
         completedAt: 1784160300,
         mode: "complete" as const,
         conclusion: "issues_found" as const,
@@ -319,9 +495,9 @@ describe("background job drawer", () => {
     ).toBeVisible();
     expect(
       within(bar).queryByText(/backend wording intentionally changed/),
-    ).not.toBeInTheDocument();
+    ).not.toBeVisible();
     expect(
-      within(bar).getByRole("button", { name: "保存先を表示" }),
+      within(bar).getByRole("button", { name: "保存先フォルダーを開く" }),
     ).toBeVisible();
   });
 
@@ -483,12 +659,12 @@ describe("background job drawer", () => {
       </I18nProvider>,
     );
     await userEvent.click(
-      await screen.findByRole("button", { name: "Show in Folder" }),
+      await screen.findByRole("button", { name: "Open containing folder" }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could Not Complete the Job Action",
     );
-    expect(screen.getByRole("alert")).toHaveTextContent("folder unavailable");
+    expect(screen.getByText("folder unavailable")).not.toBeVisible();
   });
 
   it("[UI-UX-JOB-CANCEL-ERROR] reports failed lifecycle actions instead of rejecting silently", async () => {
@@ -506,9 +682,8 @@ describe("background job drawer", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Cancel job" }),
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "already completed",
-    );
+    await screen.findByRole("alert");
+    expect(screen.getByText("already completed")).not.toBeVisible();
   });
 
   it("[UI-P2-JOB-LIST-ERROR] exposes an initial synchronization failure", async () => {
@@ -525,7 +700,7 @@ describe("background job drawer", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Could Not Synchronize Background Jobs");
-    expect(alert).toHaveTextContent("database unavailable");
+    expect(screen.getByText("database unavailable")).not.toBeVisible();
   });
 
   it("[UI-P2-JOB-LISTEN-ERROR] exposes event subscription failure", async () => {
@@ -537,8 +712,8 @@ describe("background job drawer", () => {
       </I18nProvider>,
     );
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("event channel unavailable");
+    await screen.findByRole("alert");
+    expect(screen.getByText("event channel unavailable")).not.toBeVisible();
   });
 
   it("[UI-P2-JOB-REFRESH-ON-OPEN] reconciles jobs whenever the center opens", async () => {
@@ -562,7 +737,14 @@ describe("background job drawer", () => {
         return [
           {
             ...completed,
-            warnings: ["Previous archive remains at /output/.archive.backup-1"],
+            warnings: [
+              {
+                code: "PREVIOUS_ARCHIVE_NOT_REMOVED",
+                technicalDetail:
+                  "Previous archive remains after cleanup failed",
+                recoveryPath: "/output/.archive.backup-1",
+              },
+            ],
           },
         ];
       }
@@ -577,8 +759,12 @@ describe("background job drawer", () => {
 
     expect(
       await screen.findByText(
-        "Previous archive remains at /output/.archive.backup-1",
+        "The new archive was saved, but the previous archive backup could not be removed.",
       ),
     ).toBeVisible();
+    expect(screen.getByText("/output/.archive.backup-1")).toBeVisible();
+    expect(
+      screen.getByText("Previous archive remains after cleanup failed"),
+    ).not.toBeVisible();
   });
 });

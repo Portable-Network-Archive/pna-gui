@@ -138,6 +138,7 @@ const ENGLISH = {
   keepPrivateChunks: "Keep private chunks",
   descending: "Descending order",
   start: "Start",
+  startingOperation: "Starting…",
   more: "More",
   extractArchive: "Extract archive",
   extractDescription:
@@ -177,7 +178,7 @@ const ENGLISH = {
   finishedJobs: "finished",
   noActiveJobs: "No active jobs",
   jobCenterDescription:
-    "Review progress, results, and actions for this session.",
+    "Review progress, saved results, and available actions.",
   jobCount: "{count} jobs",
   clearFinishedJobs: "Clear {count} Finished Jobs",
   createJob: "Archive creation",
@@ -207,6 +208,26 @@ const ENGLISH = {
   startingVerification: "Starting…",
   viewVerificationResults: "View results",
   verificationResults: "Verification results",
+  saveVerificationReport: "Save report",
+  saveVerificationReportTitle: "Choose a folder for the verification report",
+  reportJson: "JSON — Automation",
+  reportHtml: "HTML — Read and share",
+  verificationReportSaved: "Report saved to {path}",
+  verificationReportExportConflict:
+    "The report folder changed while saving. Try again or choose another folder.",
+  verificationReportExportPermission:
+    "The report could not be saved at this location because permission was denied.",
+  verificationReportExportStorage:
+    "The report could not be saved because the destination does not have enough free space.",
+  verificationReportExportInvalid:
+    "Choose a destination folder that still exists, with a file name matching the selected report format.",
+  verificationReportExportInvalidReport:
+    "This verification result does not have a valid archive identity. Run verification again before exporting.",
+  verificationReportExportReportMissing:
+    "The exported report file could not be found. It may have been moved or deleted.",
+  verificationReportExportJobUnavailable:
+    "This verification result is no longer available. Run verification again to export a report.",
+  verificationReportExportFailed: "The report could not be saved.",
   verificationPassed: "Checks completed",
   quickVerificationCompleted: "Structure verified; file contents not checked",
   verificationIssuesFound: "Some checks failed",
@@ -222,6 +243,8 @@ const ENGLISH = {
     "This archive has changed since this result was recorded.",
   verificationFreshnessUnknown:
     "Could not confirm whether the archive has changed since this result was recorded.",
+  verificationReportNotPersisted:
+    "The verification completed, but this result will not be available after the app restarts. Save a report before closing the app.",
   additionalChecksNotShown: "{count} additional checks are not shown.",
   checkPassed: "Checked",
   checkFailed: "Failed",
@@ -235,11 +258,20 @@ const ENGLISH = {
   checkLinkEntry: "Archive link",
   checkUnsupportedEntry: "Unsupported entry",
   checkEntryPath: "Entry path",
-  verificationTechnicalDetail: "Technical detail",
+  verificationTechnicalDetail: "Technical details",
   cancelJob: "Cancel job",
   retryJob: "Retry job",
   dismissCompletedJob: "Dismiss completed job",
-  showInFolder: "Show in Folder",
+  dismissVerificationResult: "Delete saved verification result",
+  dismissVerificationResultTitle: "Delete verification result?",
+  deleteVerificationResult: "Delete result",
+  dismissVerificationReportWarning:
+    "Delete this verification result? It will no longer be available to view or export.",
+  dismissJobResultTitle: "Remove job history?",
+  dismissJobResultWarning:
+    "This removes saved results, error details, and retry entries from the Job Center. It does not delete output files.",
+  removeJobResult: "Remove result",
+  showInFolder: "Open containing folder",
   openCreatedArchive: "Open Created Archive",
   openJobOutput: "Open Output Archive",
   jobStatusQueued: "Waiting",
@@ -253,6 +285,25 @@ const ENGLISH = {
   jobStatusInterrupted: "Interrupted",
   jobActionFailed: "Could Not Complete the Job Action",
   jobSyncFailed: "Could Not Synchronize Background Jobs",
+  jobRestarted:
+    "The app closed before this job finished. Start the operation again from its original screen if it is still needed.",
+  jobOperationFailed: "The operation could not be completed.",
+  jobOperationFailedAction:
+    "Review the operation settings and destination, then try again.",
+  jobPermissionDenied:
+    "The operation does not have permission to access one of its files or folders.",
+  jobNotFound: "A required file or folder could not be found.",
+  jobInvalidInput: "The operation settings are not valid.",
+  jobInvalidData: "The archive data could not be processed.",
+  jobWorkerFailed: "The background operation stopped unexpectedly.",
+  jobArchiveEntryAlreadyExists:
+    "An item with the same archive path already exists.",
+  jobPreviousArchiveNotRemoved:
+    "The new archive was saved, but the previous archive backup could not be removed.",
+  jobPreviousArchiveNotRemovedAction:
+    "Review and remove the retained backup after confirming the new archive.",
+  jobStateNotPersisted:
+    "This job is running, but its status may not be available after the app restarts.",
   retry: "Retry",
   jobOutputAlreadyExists: "The output file already exists.",
   jobOutputAlreadyExistsAction:
@@ -480,6 +531,7 @@ const JAPANESE: Record<TranslationKey, string> = {
   keepPrivateChunks: "プライベートチャンクを保持",
   descending: "降順",
   start: "開始",
+  startingOperation: "開始中…",
   more: "その他",
   extractArchive: "アーカイブを展開",
   extractDescription: "展開先と既存ファイルの扱いを選択します。",
@@ -516,7 +568,7 @@ const JAPANESE: Record<TranslationKey, string> = {
   activeJobs: "件を処理中",
   finishedJobs: "件完了",
   noActiveJobs: "実行中の処理はありません",
-  jobCenterDescription: "このセッションの進捗、結果、操作を確認します。",
+  jobCenterDescription: "進捗、保存された結果、利用できる操作を確認します。",
   jobCount: "{count}件のジョブ",
   clearFinishedJobs: "終了したジョブ{count}件を消去",
   createJob: "アーカイブ作成",
@@ -546,6 +598,26 @@ const JAPANESE: Record<TranslationKey, string> = {
   startingVerification: "開始中…",
   viewVerificationResults: "結果を表示",
   verificationResults: "検証結果",
+  saveVerificationReport: "レポートを保存",
+  saveVerificationReportTitle: "検証レポートの保存先フォルダーを選択",
+  reportJson: "JSON — 自動処理用",
+  reportHtml: "HTML — 閲覧・共有用",
+  verificationReportSaved: "レポートを保存しました: {path}",
+  verificationReportExportConflict:
+    "保存中にフォルダーの状態が変わりました。再試行するか別のフォルダーを選んでください。",
+  verificationReportExportPermission:
+    "この場所への保存権限がないため、レポートを保存できませんでした。",
+  verificationReportExportStorage:
+    "保存先の空き容量が足りないため、レポートを保存できませんでした。",
+  verificationReportExportInvalid:
+    "選択したレポート形式に合うファイル名で、実在する保存先フォルダーを選んでください。",
+  verificationReportExportInvalidReport:
+    "この検証結果には有効なアーカイブ識別情報がありません。再度検証してから保存してください。",
+  verificationReportExportReportMissing:
+    "書き出したレポートファイルが見つかりません。移動または削除された可能性があります。",
+  verificationReportExportJobUnavailable:
+    "この検証結果はもう利用できません。レポートを書き出すには再度検証を実行してください。",
+  verificationReportExportFailed: "レポートを保存できませんでした。",
   verificationPassed: "確認が完了しました",
   quickVerificationCompleted: "構造を確認しました（ファイル内容は未確認）",
   verificationIssuesFound: "失敗した確認項目があります",
@@ -560,6 +632,8 @@ const JAPANESE: Record<TranslationKey, string> = {
   verificationResultStale: "この結果の記録後にアーカイブが変更されています。",
   verificationFreshnessUnknown:
     "この結果の記録後にアーカイブが変更されていないか確認できませんでした。",
+  verificationReportNotPersisted:
+    "検証は完了しましたが、この結果はアプリの再起動後に表示できません。アプリを閉じる前にレポートを保存してください。",
   additionalChecksNotShown: "ほか{count}件の確認結果は省略されています。",
   checkPassed: "確認済み",
   checkFailed: "失敗",
@@ -577,7 +651,16 @@ const JAPANESE: Record<TranslationKey, string> = {
   cancelJob: "ジョブをキャンセル",
   retryJob: "ジョブを再試行",
   dismissCompletedJob: "完了したジョブを閉じる",
-  showInFolder: "保存先を表示",
+  dismissVerificationResult: "保存した検証結果を削除",
+  dismissVerificationResultTitle: "検証結果を削除しますか？",
+  deleteVerificationResult: "結果を削除",
+  dismissVerificationReportWarning:
+    "この検証結果を削除しますか？削除後は表示もエクスポートもできません。",
+  dismissJobResultTitle: "ジョブ履歴を削除しますか？",
+  dismissJobResultWarning:
+    "ジョブセンターから保存済み結果、エラー詳細、再試行項目を削除します。出力ファイルは削除しません。",
+  removeJobResult: "結果を削除",
+  showInFolder: "保存先フォルダーを開く",
   openCreatedArchive: "作成したアーカイブを開く",
   openJobOutput: "出力アーカイブを開く",
   jobStatusQueued: "待機中",
@@ -591,6 +674,24 @@ const JAPANESE: Record<TranslationKey, string> = {
   jobStatusInterrupted: "中断",
   jobActionFailed: "ジョブの操作を完了できませんでした",
   jobSyncFailed: "バックグラウンドジョブを同期できませんでした",
+  jobRestarted:
+    "ジョブの完了前にアプリが終了しました。処理がまだ必要な場合は、元の画面からもう一度開始してください。",
+  jobOperationFailed: "処理を完了できませんでした。",
+  jobOperationFailedAction:
+    "処理設定と出力先を確認してから、もう一度実行してください。",
+  jobPermissionDenied:
+    "必要なファイルまたはフォルダーへアクセスする権限がありません。",
+  jobNotFound: "必要なファイルまたはフォルダーが見つかりませんでした。",
+  jobInvalidInput: "処理の設定が正しくありません。",
+  jobInvalidData: "アーカイブのデータを処理できませんでした。",
+  jobWorkerFailed: "バックグラウンド処理が予期せず停止しました。",
+  jobArchiveEntryAlreadyExists: "同じアーカイブパスの項目が既に存在します。",
+  jobPreviousArchiveNotRemoved:
+    "新しいアーカイブは保存されましたが、以前のアーカイブのバックアップを削除できませんでした。",
+  jobPreviousArchiveNotRemovedAction:
+    "新しいアーカイブを確認した後、残されたバックアップを確認して削除してください。",
+  jobStateNotPersisted:
+    "このジョブは実行中ですが、アプリを再起動すると状態を表示できない可能性があります。",
   retry: "再試行",
   jobOutputAlreadyExists: "出力ファイルは既に存在します。",
   jobOutputAlreadyExistsAction:

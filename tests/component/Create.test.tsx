@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../src/features/i18n";
@@ -59,6 +59,35 @@ describe("archive creation wizard", () => {
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
   });
 
+  it("[UI-PICKER-CREATE-SOURCE-ERROR] keeps a source picker failure as collapsed technical evidence", async () => {
+    bridge.open.mockRejectedValueOnce(new Error("source picker unavailable"));
+    renderCreate();
+
+    await userEvent.click(screen.getByText("Drop files here"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The operation could not be completed.");
+    expect(
+      within(alert).getByText("source picker unavailable"),
+    ).not.toBeVisible();
+    await userEvent.click(within(alert).getByText("Technical details"));
+    expect(within(alert).getByText("source picker unavailable")).toBeVisible();
+  });
+
+  it("[UI-PICKER-CREATE-SOURCE-RECOVERY] clears a previous picker failure after a successful retry", async () => {
+    bridge.open
+      .mockRejectedValueOnce(new Error("source picker unavailable"))
+      .mockResolvedValueOnce(["/recovered.txt"]);
+    renderCreate();
+
+    await userEvent.click(screen.getByText("Drop files here"));
+    expect(await screen.findByRole("alert")).toBeVisible();
+    await userEvent.click(screen.getByText("Drop files here"));
+
+    expect(await screen.findByText("/recovered.txt")).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("[UI-UX-CREATE-DROPZONE-KEYBOARD] exposes the file drop target as a keyboard button", async () => {
     renderCreate();
     const dropTarget = screen.getByRole("button", {
@@ -102,6 +131,43 @@ describe("archive creation wizard", () => {
       screen.getByRole("button", { name: "Start creating" }),
     );
     expect(bridge.invoke).not.toHaveBeenCalled();
+  });
+
+  it("[UI-PICKER-CREATE-SAVE-ERROR] keeps a save picker failure as collapsed technical evidence", async () => {
+    bridge.save.mockRejectedValueOnce(new Error("save picker unavailable"));
+    renderCreate();
+    await goToConfirmation();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Start creating" }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The operation could not be completed.");
+    expect(
+      within(alert).getByText("save picker unavailable"),
+    ).not.toBeVisible();
+    await userEvent.click(within(alert).getByText("Technical details"));
+    expect(within(alert).getByText("save picker unavailable")).toBeVisible();
+    expect(bridge.invoke).not.toHaveBeenCalled();
+  });
+
+  it("[UI-CREATE-SAVE-SINGLE-FLIGHT] opens one save picker for a rapid double activation", async () => {
+    let resolveSave!: (path: null) => void;
+    bridge.save.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    renderCreate();
+    await goToConfirmation();
+    const submit = screen.getByRole("button", { name: "Start creating" });
+
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+
+    expect(bridge.save).toHaveBeenCalledTimes(1);
+    resolveSave(null);
   });
 
   it("[UI-CREATE-DEFAULT-INVOKE] normalizes the extension and queues the default options", async () => {
@@ -187,8 +253,9 @@ describe("archive creation wizard", () => {
       screen.getByRole("button", { name: "Start creating" }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "creation failed",
+      "The operation could not be completed.",
     );
+    expect(screen.getByText("creation failed")).not.toBeVisible();
     expect(
       screen.getByRole("button", { name: "Start creating" }),
     ).toBeEnabled();
