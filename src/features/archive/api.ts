@@ -12,8 +12,16 @@ import type {
 export function normalizeAppError(error: unknown): AppErrorDto {
   if (typeof error === "object" && error !== null && "message" in error) {
     const candidate = error as Partial<AppErrorDto>;
+    if (!candidate.code) {
+      return {
+        code: "INTERNAL_ERROR",
+        message: "The operation could not be completed.",
+        retryable: true,
+        context: String(candidate.message),
+      };
+    }
     return {
-      code: candidate.code ?? "INTERNAL_ERROR",
+      code: candidate.code,
       message: String(candidate.message),
       userAction: candidate.userAction,
       retryable: candidate.retryable ?? true,
@@ -21,11 +29,9 @@ export function normalizeAppError(error: unknown): AppErrorDto {
   }
   return {
     code: "INTERNAL_ERROR",
-    message:
-      typeof error === "string"
-        ? error
-        : "The operation could not be completed.",
+    message: "The operation could not be completed.",
     retryable: true,
+    context: typeof error === "string" ? error : undefined,
   };
 }
 

@@ -3192,6 +3192,7 @@ dependencies = [
 name = "pna-gui"
 version = "0.1.4"
 dependencies = [
+ "chrono",
  "fs2",
  "libpna",
  "open",

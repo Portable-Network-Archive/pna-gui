@@ -9,7 +9,7 @@ import {
   InfoCircledIcon,
   ReloadIcon,
 } from "@radix-ui/react-icons";
-import { Button, Dialog, Flex } from "@radix-ui/themes";
+import { AlertDialog, Button, Dialog, Flex } from "@radix-ui/themes";
 import {
   jobApi,
   type JobSnapshot,
@@ -17,9 +17,14 @@ import {
   type VerificationReport,
 } from "./api";
 import { TranslationKey, useI18n } from "../i18n";
+import { createSingleFlightGate } from "../singleFlight";
 import styles from "./JobDrawer.module.css";
 
 const ACTIVE = new Set<JobStatus>(["queued", "running", "cancel_requested"]);
+interface PresentedActionError {
+  summary: string;
+  detail?: string;
+}
 
 const STATUS_KEYS: Record<JobStatus, TranslationKey> = {
   queued: "jobStatusQueued",
@@ -43,19 +48,25 @@ export default function JobDrawer({
 }: {
   onOpenArchive?: (path: string) => void | Promise<void>;
   onCreatedArchive?: () => void | Promise<void>;
-  onViewVerification?: (report: VerificationReport) => void;
+  onViewVerification?: (jobId: string, report: VerificationReport) => void;
 }) {
   const { t } = useI18n();
   const [jobs, setJobs] = useState<JobSnapshot[]>([]);
   const [open, setOpen] = useState(false);
-  const [actionError, setActionError] = useState<string>();
-  const [listError, setListError] = useState<string>();
-  const [listenError, setListenError] = useState<string>();
+  const [actionError, setActionError] = useState<PresentedActionError>();
+  const [listError, setListError] = useState<PresentedActionError>();
+  const [listenError, setListenError] = useState<PresentedActionError>();
+  const [announcement, setAnnouncement] = useState("");
+  const [pendingDismiss, setPendingDismiss] = useState<{
+    ids: string[];
+    verificationOnly: boolean;
+  }>();
+  const actionGate = useMemo(createSingleFlightGate, []);
 
   const syncErrorMessage = useCallback(
     (caught: unknown) => {
       const detail = caught instanceof Error ? caught.message : String(caught);
-      return `${t("jobSyncFailed")}: ${detail}`;
+      return { summary: t("jobSyncFailed"), detail };
     },
     [t],
   );
@@ -80,6 +91,11 @@ export default function JobDrawer({
           "job-update",
           (event) => {
             setListenError(undefined);
+            if (!ACTIVE.has(event.payload.status)) {
+              setAnnouncement(
+                `${jobKindText(event.payload, t)}: ${jobStatusText(event.payload, t)}`,
+              );
+            }
             setJobs((current) => {
               const remaining = current.filter(
                 (job) => job.id !== event.payload.id,
@@ -103,7 +119,7 @@ export default function JobDrawer({
       disposed = true;
       unlisten?.();
     };
-  }, [onCreatedArchive, refreshJobs, syncErrorMessage]);
+  }, [onCreatedArchive, refreshJobs, syncErrorMessage, t]);
 
   const visible = useMemo(
     () =>
@@ -113,16 +129,41 @@ export default function JobDrawer({
     [jobs],
   );
   const syncError = listError ?? listenError;
-  if (visible.length === 0 && !syncError) return null;
+  const announcer = (
+    <div
+      className={styles.srOnly}
+      data-testid="job-announcer"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      {announcement}
+    </div>
+  );
+  if (visible.length === 0 && !syncError) return announcer;
 
   const activeCount = visible.filter((job) => ACTIVE.has(job.status)).length;
   const finishedCount = visible.length - activeCount;
   const current = visible[0];
   const reportActionError = (caught: unknown) => {
     const detail = caught instanceof Error ? caught.message : String(caught);
-    setActionError(`${t("jobActionFailed")}: ${detail}`);
+    setActionError({ summary: t("jobActionFailed"), detail });
   };
   const dismiss = async (jobId: string) => {
+    const job = visible.find((item) => item.id === jobId);
+    if (
+      job &&
+      (job.verificationReport ||
+        job.error ||
+        job.retryable ||
+        Boolean(job.warnings?.length))
+    ) {
+      setPendingDismiss({
+        ids: [jobId],
+        verificationOnly: Boolean(job.verificationReport),
+      });
+      return;
+    }
     setActionError(undefined);
     try {
       setJobs(await jobApi.dismiss(jobId));
@@ -163,109 +204,76 @@ export default function JobDrawer({
       reportActionError(caught);
     }
   };
-  const viewVerification = (report: VerificationReport) => {
+  const viewVerification = (jobId: string, report: VerificationReport) => {
     setOpen(false);
-    onViewVerification?.(report);
+    onViewVerification?.(jobId, report);
   };
-  const clearFinished = async () => {
-    setActionError(undefined);
-    try {
-      for (const job of visible.filter((item) => !ACTIVE.has(item.status))) {
-        await jobApi.dismiss(job.id);
+  const clearFinished = () =>
+    actionGate.run("clear-finished", async () => {
+      const finished = visible.filter((job) => !ACTIVE.has(job.status));
+      if (
+        finished.some(
+          (job) =>
+            job.verificationReport ||
+            job.error ||
+            job.retryable ||
+            Boolean(job.warnings?.length),
+        )
+      ) {
+        setPendingDismiss({
+          ids: finished.map((job) => job.id),
+          verificationOnly:
+            finished.length === 1 && Boolean(finished[0].verificationReport),
+        });
+        return;
       }
-      setJobs(await jobApi.list());
-    } catch (caught) {
-      reportActionError(caught);
-    }
-  };
+      setActionError(undefined);
+      try {
+        for (const job of finished) await jobApi.dismiss(job.id);
+        setJobs(await jobApi.list());
+      } catch (caught) {
+        reportActionError(caught);
+      }
+    });
 
   return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (nextOpen) void refreshJobs();
-      }}
-    >
-      <section className={styles.bar} aria-label={t("backgroundJobs")}>
-        <Dialog.Trigger>
-          <button
-            type="button"
-            className={styles.summary}
-            aria-label={t("jobCenter")}
-          >
-            <span className={styles.summaryIcon} aria-hidden="true">
-              <ReloadIcon />
-            </span>
-            <span>
-              <strong>{t("jobCenter")}</strong>
-              <small>
-                {activeCount > 0 && finishedCount > 0
-                  ? `${activeCount} ${t("activeJobs")} · ${finishedCount} ${t("finishedJobs")}`
-                  : activeCount > 0
-                    ? `${activeCount} ${t("activeJobs")}`
-                    : finishedCount > 0
-                      ? `${finishedCount} ${t("finishedJobs")}`
-                      : t("noActiveJobs")}
-              </small>
-            </span>
-          </button>
-        </Dialog.Trigger>
-        {current && (
-          <JobRow
-            job={current}
-            compact
-            onDismiss={dismiss}
-            onReveal={reveal}
-            onCancel={cancel}
-            onRetry={retry}
-            onOpenArchive={onOpenArchive ? openArchive : undefined}
-            onViewVerification={
-              onViewVerification ? viewVerification : undefined
-            }
-          />
-        )}
-        {syncError && !open && (
-          <ActionError
-            message={syncError}
-            onDismiss={() => {
-              setListError(undefined);
-              setListenError(undefined);
-            }}
-          />
-        )}
-        {actionError && !open && (
-          <ActionError
-            message={actionError}
-            onDismiss={() => setActionError(undefined)}
-          />
-        )}
-      </section>
-
-      <Dialog.Content className={styles.center} maxWidth="760px">
-        <Dialog.Title>{t("jobCenter")}</Dialog.Title>
-        <Dialog.Description>{t("jobCenterDescription")}</Dialog.Description>
-        <div className={styles.centerToolbar}>
-          <span>
-            {t("jobCount").replace("{count}", String(visible.length))}
-          </span>
-          <Button
-            type="button"
-            size="1"
-            variant="soft"
-            color="gray"
-            disabled={visible.every((job) => ACTIVE.has(job.status))}
-            onClick={() => void clearFinished()}
-          >
-            {t("clearFinishedJobs").replace("{count}", String(finishedCount))}
-          </Button>
-        </div>
-        <div className={styles.centerList}>
-          {visible.length === 0 && <p>{t("noActiveJobs")}</p>}
-          {visible.map((job) => (
+    <>
+      {announcer}
+      <Dialog.Root
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen);
+          if (nextOpen) void refreshJobs();
+        }}
+      >
+        <section className={styles.bar} aria-label={t("backgroundJobs")}>
+          <Dialog.Trigger>
+            <button
+              type="button"
+              className={styles.summary}
+              aria-label={t("jobCenter")}
+            >
+              <span className={styles.summaryIcon} aria-hidden="true">
+                <ReloadIcon />
+              </span>
+              <span>
+                <strong>{t("jobCenter")}</strong>
+                <small>
+                  {activeCount > 0 && finishedCount > 0
+                    ? `${activeCount} ${t("activeJobs")} · ${finishedCount} ${t("finishedJobs")}`
+                    : activeCount > 0
+                      ? `${activeCount} ${t("activeJobs")}`
+                      : finishedCount > 0
+                        ? `${finishedCount} ${t("finishedJobs")}`
+                        : t("noActiveJobs")}
+                </small>
+              </span>
+            </button>
+          </Dialog.Trigger>
+          {current && (
             <JobRow
-              key={job.id}
-              job={job}
+              job={current}
+              compact
               onDismiss={dismiss}
               onReveal={reveal}
               onCancel={cancel}
@@ -275,32 +283,137 @@ export default function JobDrawer({
                 onViewVerification ? viewVerification : undefined
               }
             />
-          ))}
-        </div>
-        {actionError && open && (
-          <ActionError
-            message={actionError}
-            onDismiss={() => setActionError(undefined)}
-          />
-        )}
-        {syncError && open && (
-          <ActionError
-            message={syncError}
-            onDismiss={() => {
-              setListError(undefined);
-              setListenError(undefined);
-            }}
-          />
-        )}
-        <Flex mt="4" justify="end">
-          <Dialog.Close>
-            <Button type="button" variant="soft" color="gray">
-              {t("close")}
+          )}
+          {syncError && !open && (
+            <ActionError
+              error={syncError}
+              onDismiss={() => {
+                setListError(undefined);
+                setListenError(undefined);
+              }}
+            />
+          )}
+          {actionError && !open && (
+            <ActionError
+              error={actionError}
+              onDismiss={() => setActionError(undefined)}
+            />
+          )}
+        </section>
+
+        <Dialog.Content className={styles.center} maxWidth="760px">
+          <Dialog.Title>{t("jobCenter")}</Dialog.Title>
+          <Dialog.Description>{t("jobCenterDescription")}</Dialog.Description>
+          <div className={styles.centerToolbar}>
+            <span>
+              {t("jobCount").replace("{count}", String(visible.length))}
+            </span>
+            <Button
+              type="button"
+              size="1"
+              variant="soft"
+              color="gray"
+              disabled={visible.every((job) => ACTIVE.has(job.status))}
+              onClick={() => void clearFinished()}
+            >
+              {t("clearFinishedJobs").replace("{count}", String(finishedCount))}
             </Button>
-          </Dialog.Close>
-        </Flex>
-      </Dialog.Content>
-    </Dialog.Root>
+          </div>
+          <div className={styles.centerList}>
+            {visible.length === 0 && <p>{t("noActiveJobs")}</p>}
+            {visible.map((job) => (
+              <JobRow
+                key={job.id}
+                job={job}
+                onDismiss={dismiss}
+                onReveal={reveal}
+                onCancel={cancel}
+                onRetry={retry}
+                onOpenArchive={onOpenArchive ? openArchive : undefined}
+                onViewVerification={
+                  onViewVerification ? viewVerification : undefined
+                }
+              />
+            ))}
+          </div>
+          {actionError && open && (
+            <ActionError
+              error={actionError}
+              onDismiss={() => setActionError(undefined)}
+            />
+          )}
+          {syncError && open && (
+            <ActionError
+              error={syncError}
+              onDismiss={() => {
+                setListError(undefined);
+                setListenError(undefined);
+              }}
+            />
+          )}
+          <Flex mt="4" justify="end">
+            <Dialog.Close>
+              <Button type="button" variant="soft" color="gray">
+                {t("close")}
+              </Button>
+            </Dialog.Close>
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
+      <AlertDialog.Root
+        open={pendingDismiss !== undefined}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingDismiss(undefined);
+        }}
+      >
+        <AlertDialog.Content maxWidth="480px">
+          <AlertDialog.Title>
+            {pendingDismiss?.verificationOnly
+              ? t("dismissVerificationResultTitle")
+              : t("dismissJobResultTitle")}
+          </AlertDialog.Title>
+          <AlertDialog.Description>
+            {pendingDismiss?.verificationOnly
+              ? t("dismissVerificationReportWarning")
+              : t("dismissJobResultWarning")}
+          </AlertDialog.Description>
+          <Flex gap="3" mt="5" justify="end">
+            <AlertDialog.Cancel>
+              <Button type="button" variant="soft" color="gray">
+                {t("cancel")}
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                type="button"
+                color="red"
+                onClick={() => {
+                  const ids = pendingDismiss?.ids ?? [];
+                  setPendingDismiss(undefined);
+                  void actionGate.run("confirm-dismiss", async () => {
+                    setActionError(undefined);
+                    try {
+                      if (ids.length === 1) {
+                        setJobs(await jobApi.dismiss(ids[0]));
+                      } else {
+                        for (const id of ids) await jobApi.dismiss(id);
+                        setJobs(await jobApi.list());
+                      }
+                    } catch (caught) {
+                      reportActionError(caught);
+                    }
+                  });
+                }}
+              >
+                {pendingDismiss?.verificationOnly
+                  ? t("deleteVerificationResult")
+                  : t("removeJobResult")}
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+    </>
   );
 }
 
@@ -321,11 +434,13 @@ function JobRow({
   onCancel: (jobId: string) => Promise<void>;
   onRetry: (jobId: string) => Promise<void>;
   onOpenArchive?: (path: string) => void | Promise<void>;
-  onViewVerification?: (report: VerificationReport) => void;
+  onViewVerification?: (jobId: string, report: VerificationReport) => void;
 }) {
   const { t } = useI18n();
   const canCancel = job.status === "queued" || job.status === "running";
-  const canRetry = ["failed", "cancelled", "interrupted"].includes(job.status);
+  const canRetry =
+    job.retryable !== false &&
+    ["failed", "cancelled", "interrupted"].includes(job.status);
   const canDismiss = !ACTIVE.has(job.status);
   const canOpenArchiveOutput = !["extract", "split", "verify"].includes(
     job.kind,
@@ -334,16 +449,7 @@ function JobRow({
   const progress = job.totalUnits
     ? `${job.completedUnits} ${t("of")} ${job.totalUnits}`
     : `${job.completedUnits}`;
-  const status = job.verificationReport
-    ? job.verificationReport.conclusion === "passed" &&
-      job.verificationReport.mode === "quick"
-      ? t("quickVerificationCompleted")
-      : {
-          passed: t("verificationPassed"),
-          issues_found: t("verificationIssuesFound"),
-          incomplete: t("verificationIncomplete"),
-        }[job.verificationReport.conclusion]
-    : t(STATUS_KEYS[job.status]);
+  const status = jobStatusText(job, t);
   const detail =
     job.verificationReport?.archivePath ??
     (ACTIVE.has(job.status)
@@ -403,12 +509,7 @@ function JobRow({
                 : t("completeVerification")}
             </small>
           )}
-          <span
-            aria-live={ACTIVE.has(job.status) ? undefined : "polite"}
-            aria-atomic={ACTIVE.has(job.status) ? undefined : "true"}
-          >
-            {status}
-          </span>
+          <span>{status}</span>
         </div>
         {outputIdentity ? (
           <span
@@ -447,11 +548,47 @@ function JobRow({
             {presentedError.action}
           </small>
         )}
-        {job.warnings?.map((warning) => (
-          <small key={warning} className={styles.warning} role="status">
-            {warning}
-          </small>
+        {presentedError &&
+          job.error &&
+          presentedError.message !== job.error && (
+            <details className={styles.errorRecovery}>
+              <summary>{t("verificationTechnicalDetail")}</summary>
+              <small>{job.error}</small>
+            </details>
+          )}
+        {job.warnings?.map((warning, index) => (
+          <div
+            key={`${warning.code}-${warning.recoveryPath ?? index}`}
+            className={styles.warning}
+            role="status"
+          >
+            <small>
+              {warning.code === "PREVIOUS_ARCHIVE_NOT_REMOVED"
+                ? t("jobPreviousArchiveNotRemoved")
+                : t("jobOperationFailed")}
+            </small>
+            {warning.code === "PREVIOUS_ARCHIVE_NOT_REMOVED" && (
+              <small>{t("jobPreviousArchiveNotRemovedAction")}</small>
+            )}
+            {warning.recoveryPath && (
+              <small title={warning.recoveryPath}>{warning.recoveryPath}</small>
+            )}
+            <details>
+              <summary>{t("verificationTechnicalDetail")}</summary>
+              <small>{warning.technicalDetail}</small>
+            </details>
+          </div>
         ))}
+        {job.errorCode === "VERIFICATION_REPORT_NOT_PERSISTED" && (
+          <small className={styles.warning} role="status">
+            {t("verificationReportNotPersisted")}
+          </small>
+        )}
+        {job.errorCode === "JOB_STATE_NOT_PERSISTED" && (
+          <small className={styles.warning} role="status">
+            {t("jobStateNotPersisted")}
+          </small>
+        )}
       </div>
       <div className={styles.actions}>
         {canCancel && (
@@ -511,7 +648,9 @@ function JobRow({
               type="button"
               size="1"
               variant="soft"
-              onClick={() => onViewVerification(job.verificationReport!)}
+              onClick={() =>
+                onViewVerification(job.id, job.verificationReport!)
+              }
             >
               {t("viewVerificationResults")}
             </Button>
@@ -521,7 +660,11 @@ function JobRow({
             type="button"
             className={styles.dismissButton}
             data-testid={`dismiss-job-${job.id}`}
-            aria-label={t("dismissCompletedJob")}
+            aria-label={
+              job.verificationReport
+                ? t("dismissVerificationResult")
+                : t("dismissCompletedJob")
+            }
             onClick={() => void onDismiss(job.id)}
           >
             <Cross2Icon aria-hidden="true" />
@@ -530,6 +673,45 @@ function JobRow({
       </div>
     </article>
   );
+}
+
+function jobKindText(
+  job: JobSnapshot,
+  t: (key: TranslationKey) => string,
+): string {
+  const key: Record<JobSnapshot["kind"], TranslationKey> = {
+    create: "createJob",
+    extract: "extractJob",
+    append: "appendJob",
+    delete: "deleteJob",
+    rename: "renameJob",
+    split: "splitJob",
+    concat: "concatJob",
+    sort: "sortJob",
+    strip: "stripJob",
+    migrate: "migrateJob",
+    verify: "verificationJob",
+  };
+  return t(key[job.kind]);
+}
+
+function jobStatusText(
+  job: JobSnapshot,
+  t: (key: TranslationKey) => string,
+): string {
+  if (!job.verificationReport) return t(STATUS_KEYS[job.status]);
+  if (
+    job.verificationReport.conclusion === "passed" &&
+    job.verificationReport.mode === "quick"
+  ) {
+    return t("quickVerificationCompleted");
+  }
+  const key: Record<VerificationReport["conclusion"], TranslationKey> = {
+    passed: "verificationPassed",
+    issues_found: "verificationIssuesFound",
+    incomplete: "verificationIncomplete",
+  };
+  return t(key[job.verificationReport.conclusion]);
 }
 
 function presentJobError(
@@ -542,7 +724,28 @@ function presentJobError(
       action: t("jobOutputAlreadyExistsAction"),
     };
   }
-  return { message: job.error ?? t("jobStatusFailed") };
+  if (job.errorCode === "APP_RESTARTED") {
+    return { message: t("jobRestarted") };
+  }
+  const messages: Partial<Record<string, TranslationKey>> = {
+    ARCHIVE_ENTRY_ALREADY_EXISTS: "jobArchiveEntryAlreadyExists",
+    NOT_FOUND: "jobNotFound",
+    PERMISSION_DENIED: "jobPermissionDenied",
+    INVALID_INPUT: "jobInvalidInput",
+    INVALID_DATA: "jobInvalidData",
+    WORKER_PANIC: "jobWorkerFailed",
+    WORKER_SPAWN_FAILED: "jobWorkerFailed",
+    OPERATION_FAILED: "jobOperationFailed",
+    INTERRUPTED: "jobOperationFailed",
+    CANCELLED: "jobStatusCancelled",
+  };
+  return {
+    message: t(messages[job.errorCode ?? ""] ?? "jobOperationFailed"),
+    action:
+      job.errorCode === "CANCELLED" || job.errorCode === "APP_RESTARTED"
+        ? undefined
+        : t("jobOperationFailedAction"),
+  };
 }
 
 function splitResultPath(path: string): { name: string; parent: string } {
@@ -555,16 +758,22 @@ function splitResultPath(path: string): { name: string; parent: string } {
 }
 
 function ActionError({
-  message,
+  error,
   onDismiss,
 }: {
-  message: string;
+  error: PresentedActionError;
   onDismiss: () => void;
 }) {
   const { t } = useI18n();
   return (
     <div className={styles.actionError} role="alert">
-      <span>{message}</span>
+      <span>{error.summary}</span>
+      {error.detail && (
+        <details>
+          <summary>{t("verificationTechnicalDetail")}</summary>
+          <small>{error.detail}</small>
+        </details>
+      )}
       <button type="button" aria-label={t("dismissError")} onClick={onDismiss}>
         <Cross2Icon aria-hidden="true" />
       </button>

@@ -20,6 +20,8 @@ libpna = "0.35.0"
 open = "5.3.5"
 fs2 = "0.4"
 sha2 = "0.10"
+tempfile = "3"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-wdio = { version = "1.2.0", optional = true }
@@ -38,9 +40,6 @@ crate-type = ["staticlib", "cdylib", "lib"]
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-cli = "2"
 tauri-plugin-updater = "2"
-
-[dev-dependencies]
-tempfile = "3"
 
 [[example]]
 name = "generate_e2e_fixture"

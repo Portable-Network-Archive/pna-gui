@@ -70,6 +70,19 @@ describe("shipped feature boundaries", () => {
     expect(jobs).toContain("Self::Verify(_) => None");
   });
 
+  it("registers bounded verification report export and reveal commands", () => {
+    // ARCH-REPORT-IPC-REGISTERED
+    const backend = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
+    for (const command of [
+      "report_export_verification",
+      "reports::report_reveal_export",
+    ]) {
+      expect(backend).toMatch(
+        new RegExp(`generate_handler!\\[[\\s\\S]*\\b${command},?`),
+      );
+    }
+  });
+
   it("preserves the five-platform CI architecture", () => {
     // ARCH-CI-FIVE-PLATFORMS, ARCH-CI-RUST-FRONTEND-ASSET
     const workflow = readFileSync(
@@ -240,8 +253,20 @@ describe("shipped feature boundaries", () => {
     expect(backend).not.toContain('let _ = app.emit("job-update"');
   });
 
+  it("uses operating-system entropy for the secret request identity salt", () => {
+    // ARCH-JOB-SECRET-CSPRNG
+    const jobApi = readFileSync(
+      resolve(root, "src/features/jobs/api.ts"),
+      "utf8",
+    );
+    expect(jobApi).toContain("crypto.getRandomValues");
+    expect(jobApi).not.toContain("Math.random");
+  });
+
   it("keeps archive commands compact and named at narrow desktop widths", () => {
     // UI-UX-RESPONSIVE-TOOLBAR
+    // UI-VERIFY-MIN-WIDTH-LABEL
+    // UI-PRIMARY-ACTIONS-MIN-WIDTH
     const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
     const css = readFileSync(resolve(root, "src/App.module.css"), "utf8");
     for (const command of [
@@ -258,6 +283,9 @@ describe("shipped feature boundaries", () => {
     }
     expect(css).toMatch(/\.toolbarButton\s*\{[^}]*white-space:\s*nowrap/s);
     expect(css).toMatch(
+      /@media\s*\(max-width:\s*900px\)[\s\S]*\.toolbarLabelSecondary\s*\{[^}]*display:\s*none/s,
+    );
+    expect(css).not.toMatch(
       /@media\s*\(max-width:\s*900px\)[\s\S]*\.toolbarLabel\s*\{[^}]*display:\s*none/s,
     );
   });

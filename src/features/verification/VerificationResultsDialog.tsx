@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Button, Dialog, Flex } from "@radix-ui/themes";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { Button, Dialog, DropdownMenu, Flex, Spinner } from "@radix-ui/themes";
 import { formatBytes, formatCount } from "../archive/presentation";
 import { type TranslationKey, useI18n } from "../i18n";
 import {
@@ -11,6 +12,13 @@ import {
   type VerificationReport,
 } from "../jobs/api";
 import styles from "./VerificationResultsDialog.module.css";
+import {
+  normalizeReportExportError,
+  verificationReportApi,
+  type VerificationReportExportErrorCode,
+  type VerificationReportFormat,
+} from "./api";
+import { createSingleFlightGate } from "../singleFlight";
 
 const CHECK_LABELS: Record<VerificationCheckCode, TranslationKey> = {
   archive_header: "checkArchiveHeader",
@@ -34,16 +42,25 @@ type Freshness = "loading" | "fresh" | "stale" | "unknown";
 
 export default function VerificationResultsDialog({
   open,
+  jobId,
   report,
   onOpenChange,
 }: {
   open: boolean;
+  jobId: string;
   report: VerificationReport;
   onOpenChange: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
   const [freshness, setFreshness] = useState<Freshness>("loading");
   const [freshnessError, setFreshnessError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportPath, setExportPath] = useState<string>();
+  const [exportError, setExportError] = useState<{
+    summary: string;
+    detail: string;
+  }>();
+  const exportGate = useMemo(createSingleFlightGate, []);
   const normalizedPath = report.archivePath.replaceAll("\\", "/");
   const lastSlashIndex = normalizedPath.lastIndexOf("/");
   const archiveName = normalizedPath.slice(lastSlashIndex + 1);
@@ -94,6 +111,46 @@ export default function VerificationResultsDialog({
           issues_found: t("verificationIssuesFound"),
           incomplete: t("verificationIncomplete"),
         }[report.conclusion];
+  const exportErrorLabel = (code: VerificationReportExportErrorCode): string =>
+    ({
+      conflict: t("verificationReportExportConflict"),
+      permission_denied: t("verificationReportExportPermission"),
+      storage_full: t("verificationReportExportStorage"),
+      invalid_destination: t("verificationReportExportInvalid"),
+      invalid_report: t("verificationReportExportInvalidReport"),
+      report_missing: t("verificationReportExportReportMissing"),
+      job_unavailable: t("verificationReportExportJobUnavailable"),
+      io: t("verificationReportExportFailed"),
+    })[code];
+  const exportReport = (format: VerificationReportFormat) =>
+    exportGate.run("report-export", async () => {
+      try {
+        const directory = await openDialog({
+          title: t("saveVerificationReportTitle"),
+          directory: true,
+          multiple: false,
+        });
+        if (typeof directory !== "string") return;
+        setExportError(undefined);
+        setExporting(true);
+        setExportPath(undefined);
+        const result = await verificationReportApi.export(
+          jobId,
+          format,
+          directory,
+          locale,
+        );
+        setExportPath(result.path);
+      } catch (caught) {
+        const error = normalizeReportExportError(caught);
+        setExportError({
+          summary: exportErrorLabel(error.code),
+          detail: error.message,
+        });
+      } finally {
+        setExporting(false);
+      }
+    });
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -112,10 +169,15 @@ export default function VerificationResultsDialog({
           </p>
         )}
         {freshness === "unknown" && (
-          <p className={styles.staleNotice} role="status">
-            {t("verificationFreshnessUnknown")}
-            {freshnessError && <small>{freshnessError}</small>}
-          </p>
+          <div className={styles.staleNotice} role="status">
+            <span>{t("verificationFreshnessUnknown")}</span>
+            {freshnessError && (
+              <details>
+                <summary>{t("verificationTechnicalDetail")}</summary>
+                <small>{freshnessError}</small>
+              </details>
+            )}
+          </div>
         )}
         <section className={styles.summary} data-conclusion={report.conclusion}>
           <h2>{conclusion}</h2>
@@ -189,7 +251,61 @@ export default function VerificationResultsDialog({
             )}
           </p>
         )}
-        <Flex mt="5" justify="end">
+        {exportPath && (
+          <div className={styles.exportResult}>
+            <span role="status">
+              {t("verificationReportSaved").replace("{path}", exportPath)}
+            </span>
+            <Button
+              type="button"
+              size="1"
+              variant="ghost"
+              onClick={() => {
+                void verificationReportApi
+                  .reveal(exportPath)
+                  .catch((caught: unknown) => {
+                    const error = normalizeReportExportError(caught);
+                    setExportError({
+                      summary: exportErrorLabel(error.code),
+                      detail: error.message,
+                    });
+                  });
+              }}
+            >
+              {t("showInFolder")}
+            </Button>
+          </div>
+        )}
+        {exportError && (
+          <div className={styles.exportError} role="alert">
+            <span>{exportError.summary}</span>
+            <details>
+              <summary>{t("verificationTechnicalDetail")}</summary>
+              <small>{exportError.detail}</small>
+            </details>
+          </div>
+        )}
+        <Flex gap="3" mt="5" justify="between">
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <Button
+                type="button"
+                variant="soft"
+                disabled={exporting || freshness === "loading"}
+              >
+                {exporting && <Spinner size="1" />}
+                {t("saveVerificationReport")}
+              </Button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content>
+              <DropdownMenu.Item onSelect={() => void exportReport("html")}>
+                {t("reportHtml")}
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => void exportReport("json")}>
+                {t("reportJson")}
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
           <Dialog.Close>
             <Button type="button" variant="soft" color="gray">
               {t("close")}

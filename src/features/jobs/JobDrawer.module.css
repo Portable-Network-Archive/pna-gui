@@ -1,3 +1,13 @@
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .bar {
   display: grid;
   grid-template-columns: 180px minmax(0, 1fr);
@@ -170,6 +180,8 @@
 }
 
 .warning {
+  display: grid;
+  gap: 3px;
   overflow-wrap: anywhere;
   color: #8a5a00 !important;
 }

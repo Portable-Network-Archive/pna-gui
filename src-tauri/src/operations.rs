@@ -136,7 +136,15 @@ pub struct MigrateRequest {
 pub struct OperationOutcome {
     pub output_path: PathBuf,
     pub completed_items: u64,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<OperationWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationWarning {
+    pub code: String,
+    pub technical_detail: String,
+    pub recovery_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -1703,7 +1711,11 @@ fn unique_sibling_path(path: &Path, purpose: &str) -> io::Result<PathBuf> {
     ))
 }
 
-fn commit_output(partial: &Path, output: &Path, overwrite: bool) -> io::Result<Vec<String>> {
+fn commit_output(
+    partial: &Path,
+    output: &Path,
+    overwrite: bool,
+) -> io::Result<Vec<OperationWarning>> {
     commit_output_with(
         partial,
         output,
@@ -1746,7 +1758,7 @@ fn commit_output_with(
     overwrite: bool,
     mut rename: impl FnMut(&Path, &Path) -> io::Result<()>,
     mut remove: impl FnMut(&Path) -> io::Result<()>,
-) -> io::Result<Vec<String>> {
+) -> io::Result<Vec<OperationWarning>> {
     if output.exists() {
         if !overwrite {
             return Err(io::Error::new(
@@ -1760,11 +1772,13 @@ fn commit_output_with(
             Ok(()) => {
                 let warnings = remove(&backup)
                     .err()
-                    .map(|error| {
-                        format!(
+                    .map(|error| OperationWarning {
+                        code: "PREVIOUS_ARCHIVE_NOT_REMOVED".into(),
+                        technical_detail: format!(
                             "archive was committed, but the previous archive could not be removed at {}: {error}",
                             backup.display()
-                        )
+                        ),
+                        recovery_path: Some(backup.clone()),
                     })
                     .into_iter()
                     .collect();
@@ -2150,6 +2164,53 @@ mod tests {
     }
 
     #[test]
+    fn concat_cancellation_removes_the_partial_and_preserves_every_part() {
+        // BE-VOLUME-CONCAT-CANCEL-CLEANUP
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("source.pna");
+        let parts_dir = temp.path().join("parts");
+        write_archive(&source, &[("payload.bin", &vec![7_u8; 4096])], None);
+        split_archive(
+            &SplitRequest {
+                archive_path: source,
+                output_directory: parts_dir.clone(),
+                max_part_bytes: 512,
+            },
+            || false,
+            |_, _, _| {},
+        )
+        .unwrap();
+        let parts = discover_concat_parts(&[parts_dir.join("source.part1.pna")]).unwrap();
+        let originals = parts
+            .iter()
+            .map(|path| (path.clone(), fs::read(path).unwrap()))
+            .collect::<Vec<_>>();
+        let output = temp.path().join("joined.pna");
+        let cancelled = AtomicBool::new(false);
+
+        let error = concat_archives(
+            &ConcatRequest {
+                parts,
+                output_path: output.clone(),
+            },
+            || cancelled.load(Ordering::SeqCst),
+            |_, _, _| cancelled.store(true, Ordering::SeqCst),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert!(!output.exists());
+        for (path, bytes) in originals {
+            assert_eq!(fs::read(path).unwrap(), bytes);
+        }
+        assert!(fs::read_dir(temp.path()).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains("partial")));
+    }
+
+    #[test]
     fn split_publication_failure_never_leaves_a_discoverable_prefix() {
         // BE-VOLUME-PUBLISH-FAILURE-NONDISCOVERABLE
         let temp = tempdir().unwrap();
@@ -2526,6 +2587,39 @@ mod tests {
         .unwrap_err();
         assert_eq!(cancelled.kind(), io::ErrorKind::Interrupted);
         assert_eq!(fs::read(&archive_path).unwrap(), original);
+    }
+
+    #[test]
+    fn delete_and_rename_shared_rewrite_cancellation_preserves_the_archive() {
+        // BE-UPDATE-EDIT-CANCEL-PRESERVES-SOURCE
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("project.pna");
+        write_archive(
+            &archive_path,
+            &[("first.txt", b"first"), ("second.txt", b"second")],
+            None,
+        );
+        let original = fs::read(&archive_path).unwrap();
+        let cancelled = AtomicBool::new(false);
+
+        let error = delete_archive_entries(
+            &DeleteEntriesRequest {
+                archive_path: archive_path.clone(),
+                entries: vec![PathBuf::from("first.txt")],
+                password: None,
+            },
+            || cancelled.load(Ordering::SeqCst),
+            |_, _, _| cancelled.store(true, Ordering::SeqCst),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(fs::read(&archive_path).unwrap(), original);
+        assert!(fs::read_dir(temp.path()).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains("partial")));
     }
 
     #[test]
@@ -3232,8 +3326,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("simulated cleanup failure"));
-        assert!(warnings[0].contains(".output.pna.backup-"));
+        assert_eq!(warnings[0].code, "PREVIOUS_ARCHIVE_NOT_REMOVED");
+        assert!(warnings[0]
+            .technical_detail
+            .contains("simulated cleanup failure"));
+        assert!(warnings[0]
+            .recovery_path
+            .as_ref()
+            .unwrap()
+            .to_string_lossy()
+            .contains(".output.pna.backup-"));
     }
 
     #[test]

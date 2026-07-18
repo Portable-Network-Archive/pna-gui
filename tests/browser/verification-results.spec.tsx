@@ -10,12 +10,15 @@ test("[UI-VISUAL-VERIFY-RESULTS] keeps factual evidence readable at desktop dial
     <I18nProvider>
       <VerificationResultsDialog
         open
+        jobId="job-browser-report"
         onOpenChange={() => undefined}
         report={{
           archivePath:
             "/Users/example/Backups/a-long-project-name/archive-2026-07-16.pna",
           sourceSize: 5368713216,
           sourceModifiedAt: 1784160000,
+          sourceSha256:
+            "f1a5a48b3b1f91208b982163be46f3a865f157989a4a195c6806144c4f8f23ac",
           completedAt: 1784160300,
           mode: "complete",
           conclusion: "incomplete",
@@ -52,7 +55,7 @@ test("[UI-VISUAL-VERIFY-RESULTS] keeps factual evidence readable at desktop dial
       "Encrypted uncompressed content has no plaintext integrity metadata.",
     ),
   ).not.toBeVisible();
-  await dialog.getByText("Technical detail").click();
+  await dialog.getByRole("list").getByText("Technical details").click();
   await expect(
     dialog.getByText(
       "Encrypted uncompressed content has no plaintext integrity metadata.",
@@ -61,5 +64,9 @@ test("[UI-VISUAL-VERIFY-RESULTS] keeps factual evidence readable at desktop dial
   const box = await dialog.boundingBox();
   expect(box?.width).toBeLessThanOrEqual(680);
   expect(box?.height).toBeLessThanOrEqual(720);
+  // UI-VISUAL-REPORT-ACTIONS
   await expect(dialog.getByRole("button", { name: "Close" })).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Save report" }),
+  ).toBeVisible();
 });

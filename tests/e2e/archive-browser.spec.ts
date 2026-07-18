@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { resolve } from "node:path";
+import type { VerificationReport } from "../../src/features/jobs/api";
 
 async function invokeTauri<T>(command: string, args?: Record<string, unknown>) {
   return browser.execute(
@@ -45,11 +46,7 @@ async function waitForJob(jobId: string) {
       id: string;
       status: string;
       error?: string;
-      verificationReport?: {
-        conclusion: string;
-        filesChecked: number;
-        checks: Array<{ code: string; status: string }>;
-      };
+      verificationReport?: VerificationReport;
     }>
   >("job_list");
   return jobs.find((job) => job.id === jobId)!;
@@ -282,6 +279,31 @@ describe("Tauri archive browser", () => {
     expect(correctResult.status).toBe("succeeded");
     expect(correctResult.verificationReport?.conclusion).toBe("passed");
     expect(correctResult.verificationReport?.filesChecked).toBe(1);
+    // E2E-REPORT-EXPORT-JSON
+    const exported = await invokeTauri<{ path: string }>(
+      "report_export_verification",
+      {
+        request: {
+          jobId: correct.id,
+          format: "json",
+          directory: runtime,
+          locale: "en",
+        },
+      },
+    );
+    const reportPath = exported.path;
+    expect(reportPath).toBe(resolve(runtime, "verify-verification.json"));
+    const reportDocument = readFileSync(reportPath, "utf8");
+    const parsed = JSON.parse(reportDocument) as {
+      archive: { archiveName: string; sha256: string };
+      verification: { conclusion: string; limitations: string[] };
+    };
+    expect(parsed.archive.archiveName).toBe("verify.pna");
+    expect(parsed.archive.sha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(parsed.verification.conclusion).toBe("passed");
+    expect(parsed.verification.limitations.length).toBeGreaterThan(0);
+    expect(reportDocument).not.toContain(archive);
+    expect(reportDocument).not.toContain("secret");
 
     const wrong = await invokeTauri<{ id: string }>("job_start_verify", {
       request: {

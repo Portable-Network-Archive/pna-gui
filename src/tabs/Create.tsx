@@ -6,6 +6,7 @@ import { ArchiveIcon, Cross1Icon, FileIcon } from "@radix-ui/react-icons";
 import { Button } from "@radix-ui/themes";
 import { TranslationKey, useI18n } from "../features/i18n";
 import { jobApi } from "../features/jobs/api";
+import { createSingleFlightGate } from "../features/singleFlight";
 import styles from "./Create.module.css";
 
 const COMPRESSION = ["store", "deflate", "zstd", "xz"] as const;
@@ -88,27 +89,46 @@ export default function Create() {
   const [overwrite, setOverwrite] = useState(false);
   const [draggingOver, setDraggingOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<{ summary: string; detail?: string }>();
   const [queuedJob, setQueuedJob] = useState<string>();
+  const actionGate = useMemo(createSingleFlightGate, []);
   const addSources = (paths: string[]) => {
     setSources((current) => [...new Set([...current, ...paths])]);
   };
 
-  const chooseFiles = async () => {
-    const selected = await open({ multiple: true });
-    if (selected) addSources([selected].flat());
-  };
+  const chooseFiles = () =>
+    actionGate.run("source-picker", async () => {
+      setError(undefined);
+      try {
+        const selected = await open({ multiple: true });
+        if (selected) addSources([selected].flat());
+      } catch (caught) {
+        setError({
+          summary: t("jobOperationFailed"),
+          detail: caught instanceof Error ? caught.message : String(caught),
+        });
+      }
+    });
 
-  const chooseFolder = async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (typeof selected === "string") addSources([selected]);
-  };
+  const chooseFolder = () =>
+    actionGate.run("source-picker", async () => {
+      setError(undefined);
+      try {
+        const selected = await open({ directory: true, multiple: false });
+        if (typeof selected === "string") addSources([selected]);
+      } catch (caught) {
+        setError({
+          summary: t("jobOperationFailed"),
+          detail: caught instanceof Error ? caught.message : String(caught),
+        });
+      }
+    });
 
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void import("@tauri-apps/api/webviewWindow").then(
-      async ({ getCurrentWebviewWindow }) => {
+    void import("@tauri-apps/api/webviewWindow")
+      .then(async ({ getCurrentWebviewWindow }) => {
         if (disposed) return;
         unlisten = await getCurrentWebviewWindow().onDragDropEvent((event) => {
           if (event.payload.type === "enter" || event.payload.type === "over")
@@ -119,13 +139,15 @@ export default function Create() {
             addSources(event.payload.paths);
           }
         });
-      },
-    );
+      })
+      .catch(() => {
+        if (!disposed) setError({ summary: t("jobSyncFailed") });
+      });
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, []);
+  }, [t]);
 
   const validation = useMemo(() => {
     if (settings.reproducible && settings.encryption !== "none")
@@ -144,45 +166,49 @@ export default function Create() {
     }
   };
 
-  const start = async () => {
-    if (validation) {
-      setError(validation);
-      return;
-    }
-    const selected = await save({
-      title: t("saveArchive"),
-      defaultPath: "archive.pna",
-      filters: [{ name: "PNA Archive", extensions: ["pna"] }],
+  const start = () =>
+    actionGate.run("create-submit", async () => {
+      if (validation) {
+        setError({ summary: validation });
+        return;
+      }
+      setError(undefined);
+      try {
+        const selected = await save({
+          title: t("saveArchive"),
+          defaultPath: "archive.pna",
+          filters: [{ name: "PNA Archive", extensions: ["pna"] }],
+        });
+        if (!selected) return;
+        const outputPath = selected.toLowerCase().endsWith(".pna")
+          ? selected
+          : `${selected}.pna`;
+        setSubmitting(true);
+        await jobApi.startCreate({
+          sources,
+          outputPath,
+          overwrite,
+          options: {
+            solid: settings.solid,
+            compression: settings.compression,
+            encryption: settings.encryption,
+            password: settings.encryption === "none" ? null : password,
+            preservePermissions: settings.preservePermissions,
+            reproducible: settings.reproducible,
+          },
+        });
+        setQueuedJob(outputPath);
+        setSources([]);
+        setStep(1);
+      } catch (caught) {
+        setError({
+          summary: t("jobOperationFailed"),
+          detail: caught instanceof Error ? caught.message : String(caught),
+        });
+      } finally {
+        setSubmitting(false);
+      }
     });
-    if (!selected) return;
-    const outputPath = selected.toLowerCase().endsWith(".pna")
-      ? selected
-      : `${selected}.pna`;
-    setSubmitting(true);
-    setError(undefined);
-    try {
-      await jobApi.startCreate({
-        sources,
-        outputPath,
-        overwrite,
-        options: {
-          solid: settings.solid,
-          compression: settings.compression,
-          encryption: settings.encryption,
-          password: settings.encryption === "none" ? null : password,
-          preservePermissions: settings.preservePermissions,
-          reproducible: settings.reproducible,
-        },
-      });
-      setQueuedJob(outputPath);
-      setSources([]);
-      setStep(1);
-    } catch (caught) {
-      setError(String(caught));
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   return (
     <section className={styles.wizard} aria-label={t("createWizard")}>
@@ -219,7 +245,13 @@ export default function Create() {
       )}
       {error && (
         <div className={styles.error} role="alert">
-          {error}
+          <span>{error.summary}</span>
+          {error.detail && (
+            <details>
+              <summary>{t("verificationTechnicalDetail")}</summary>
+              <small>{error.detail}</small>
+            </details>
+          )}
         </div>
       )}
 
