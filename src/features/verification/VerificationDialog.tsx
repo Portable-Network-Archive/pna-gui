@@ -13,6 +13,7 @@ interface VerificationDialogProps {
   encrypted: boolean;
   sessionPassword?: string;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 export default function VerificationDialog({
@@ -22,6 +23,7 @@ export default function VerificationDialog({
   encrypted,
   sessionPassword,
   onOpenChange,
+  onCloseAutoFocus,
 }: VerificationDialogProps) {
   const { t } = useI18n();
   const [mode, setMode] = useState<VerificationMode>("quick");
@@ -71,7 +73,7 @@ export default function VerificationDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content maxWidth="560px">
+      <Dialog.Content maxWidth="560px" onCloseAutoFocus={onCloseAutoFocus}>
         <Dialog.Title>{t("verifyArchiveTitle")}</Dialog.Title>
         <Dialog.Description>{t("verifyArchiveDescription")}</Dialog.Description>
         <form

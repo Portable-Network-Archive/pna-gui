@@ -39,6 +39,7 @@ import {
 } from "@radix-ui/themes";
 import { getMatches } from "@tauri-apps/plugin-cli";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   open as openDialog,
   save as saveDialog,
@@ -80,16 +81,18 @@ import type {
 import styles from "./App.module.css";
 import {
   jobApi,
+  type ComparisonResult,
   type JobSnapshot,
   type VerificationReport,
 } from "./features/jobs/api";
 import JobDrawer from "./features/jobs/JobDrawer";
+import ComparisonView from "./features/comparison/ComparisonView";
 import VerificationDialog from "./features/verification/VerificationDialog";
 import VerificationResultsDialog from "./features/verification/VerificationResultsDialog";
 
 registerE2eBridge();
 
-type AppView = "home" | "browser" | "create";
+type AppView = "home" | "browser" | "create" | "compare";
 type TreePages = Record<string, ArchiveEntry[]>;
 interface ActiveArchiveSession {
   archive: OpenArchiveResult;
@@ -118,9 +121,20 @@ function AppContent() {
   const [passwordPath, setPasswordPath] = useState<string>();
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string>();
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [verificationResult, setVerificationResult] = useState<{
     jobId: string;
     report: VerificationReport;
+  }>();
+  const [comparisonView, setComparisonView] = useState<{
+    jobId?: string;
+    result?: ComparisonResult;
+    initialLeft?: {
+      kind: "archive";
+      path: string;
+      password: string | null;
+    };
+    returnView: "home" | "browser";
   }>();
   const openingRef = useRef(false);
   const cliSourceHandledRef = useRef(false);
@@ -130,6 +144,27 @@ function AppContent() {
   >(undefined);
   const pickerGate = useMemo(createSingleFlightGate, []);
   const recentActionGate = useMemo(createSingleFlightGate, []);
+  const zoomRef = useRef(1);
+  const passwordFocusReturnRef = useRef<HTMLElement | null>(null);
+  const verificationFocusReturnRef = useRef<HTMLElement | null>(null);
+
+  const applyZoom = useCallback(async (action: "in" | "out" | "reset") => {
+    const previous = zoomRef.current;
+    const next =
+      action === "reset"
+        ? 1
+        : Math.min(
+            2,
+            Math.max(0.5, zoomRef.current + (action === "in" ? 0.1 : -0.1)),
+          );
+    zoomRef.current = next;
+    try {
+      await getCurrentWebview().setZoom(next);
+    } catch (caught) {
+      zoomRef.current = previous;
+      throw caught;
+    }
+  }, []);
 
   const refreshBootstrap = useCallback(async () => {
     try {
@@ -142,6 +177,12 @@ function AppContent() {
   const openArchivePath = useCallback(
     async (path: string, suppliedPassword?: string) => {
       if (openingRef.current) return;
+      if (
+        suppliedPassword === undefined &&
+        document.activeElement instanceof HTMLElement
+      ) {
+        passwordFocusReturnRef.current = document.activeElement;
+      }
       openingRef.current = true;
       setBusy(true);
       setError(undefined);
@@ -175,7 +216,14 @@ function AppContent() {
           appError.code === "WRONG_PASSWORD"
         ) {
           setPasswordPath(path);
-          setPassword("");
+          // Preserve an attempted password after a failed verification so the
+          // dialog remains an ordinary, recoverable form instead of appearing
+          // to reset or lock itself. The first password prompt still starts blank.
+          setPassword((current) =>
+            appError.code === "WRONG_PASSWORD"
+              ? (suppliedPassword ?? current)
+              : "",
+          );
           setPasswordError(
             appError.code === "WRONG_PASSWORD"
               ? localizeError(appError, t).message
@@ -242,7 +290,7 @@ function AppContent() {
       if (disposed) return;
       const appWindow = getCurrentWebviewWindow();
       const unlistenDrop = await appWindow.onDragDropEvent((event) => {
-        if (view === "create") return;
+        if (view === "create" || view === "compare") return;
         if (event.payload.type === "enter") setDragActive(true);
         if (event.payload.type === "leave") setDragActive(false);
         if (event.payload.type === "drop") {
@@ -260,7 +308,15 @@ function AppContent() {
           else void chooseArchive();
         },
       );
-      cleanups = [unlistenDrop, unlistenMenu];
+      const unlistenZoom = await appWindow.listen<"in" | "out" | "reset">(
+        "view-zoom",
+        (event) => {
+          void applyZoom(event.payload).catch((caught) =>
+            setError(normalizeAppError(caught)),
+          );
+        },
+      );
+      cleanups = [unlistenDrop, unlistenMenu, unlistenZoom];
     })().catch((caught) => {
       if (!disposed) setError(normalizeAppError(caught));
     });
@@ -285,7 +341,7 @@ function AppContent() {
       disposed = true;
       cleanups.forEach((cleanup) => cleanup());
     };
-  }, [chooseArchive, openArchivePath, view]);
+  }, [applyZoom, chooseArchive, openArchivePath, view]);
 
   const refreshOpenArchive = useCallback(
     async (path: string) => {
@@ -348,10 +404,28 @@ function AppContent() {
         event.preventDefault();
         setView("create");
       }
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        void applyZoom("in").catch((caught) =>
+          setError(normalizeAppError(caught)),
+        );
+      }
+      if (event.key === "-") {
+        event.preventDefault();
+        void applyZoom("out").catch((caught) =>
+          setError(normalizeAppError(caught)),
+        );
+      }
+      if (event.key === "0") {
+        event.preventDefault();
+        void applyZoom("reset").catch((caught) =>
+          setError(normalizeAppError(caught)),
+        );
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [chooseArchive]);
+  }, [applyZoom, chooseArchive]);
 
   const removeRecent = (path: string) =>
     recentActionGate.run(`remove-recent:${path}`, async () => {
@@ -373,6 +447,10 @@ function AppContent() {
           onDismissError={() => setError(undefined)}
           onOpen={chooseArchive}
           onCreate={() => setView("create")}
+          onCompare={() => {
+            setComparisonView({ returnView: "home" });
+            setView("compare");
+          }}
           onOpenRecent={openArchivePath}
           onRemoveRecent={removeRecent}
         />
@@ -387,6 +465,17 @@ function AppContent() {
           onOpen={chooseArchive}
           onError={setError}
           sessionPassword={activeArchiveRef.current?.password}
+          onCompare={() => {
+            setComparisonView({
+              returnView: "browser",
+              initialLeft: {
+                kind: "archive",
+                path: openArchive.summary.path,
+                password: activeArchiveRef.current?.password ?? null,
+              },
+            });
+            setView("compare");
+          }}
         />
       )}
       {view === "create" && (
@@ -407,6 +496,22 @@ function AppContent() {
             <Create />
           </div>
         </div>
+      )}
+      {view === "compare" && comparisonView && (
+        <ComparisonView
+          jobId={comparisonView.jobId}
+          result={comparisonView.result}
+          initialLeft={comparisonView.initialLeft}
+          onBack={() => setView(comparisonView.returnView)}
+          onViewResult={(jobId, result) => {
+            setComparisonView((current) => ({
+              initialLeft: current?.initialLeft,
+              jobId,
+              result,
+              returnView: current?.returnView ?? "home",
+            }));
+          }}
+        />
       )}
 
       {dragActive && (
@@ -432,19 +537,39 @@ function AppContent() {
             setPasswordPath(undefined);
             setPassword("");
             setPasswordError(undefined);
+            setPasswordSubmitting(false);
           }
         }}
       >
-        <Dialog.Content maxWidth="420px">
+        <Dialog.Content
+          maxWidth="420px"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const target = passwordFocusReturnRef.current;
+            requestAnimationFrame(() => {
+              if (target?.isConnected) target.focus();
+              else {
+                document
+                  .querySelector<HTMLElement>("[data-testid='archive-home']")
+                  ?.focus();
+              }
+            });
+          }}
+        >
           <Dialog.Title>{t("passwordRequired")}</Dialog.Title>
           <Dialog.Description size="2" color="gray">
             {t("encryptedArchive")}
           </Dialog.Description>
           <form
-            onSubmit={(event) => {
+            onSubmit={async (event) => {
               event.preventDefault();
-              if (passwordPath && password)
-                void openArchivePath(passwordPath, password);
+              if (!passwordPath || !password || passwordSubmitting) return;
+              setPasswordSubmitting(true);
+              try {
+                await openArchivePath(passwordPath, password);
+              } finally {
+                setPasswordSubmitting(false);
+              }
             }}
           >
             <label className={styles.dialogField}>
@@ -456,6 +581,10 @@ function AppContent() {
                 type="password"
                 name="archive-password"
                 value={password}
+                aria-invalid={Boolean(passwordError)}
+                aria-describedby={
+                  passwordError ? "archive-password-error" : undefined
+                }
                 onChange={(event) => {
                   setPassword(event.target.value);
                   setPasswordError(undefined);
@@ -463,7 +592,12 @@ function AppContent() {
                 autoComplete="current-password"
               />
               {passwordError && (
-                <Text size="1" color="red" role="alert">
+                <Text
+                  id="archive-password-error"
+                  size="1"
+                  color="red"
+                  role="alert"
+                >
                   {passwordError}
                 </Text>
               )}
@@ -477,9 +611,15 @@ function AppContent() {
               <Button
                 type="submit"
                 data-testid="archive-password-submit"
-                disabled={!password || busy}
+                disabled={!password || busy || passwordSubmitting}
               >
-                {t("open")}
+                {passwordSubmitting ? (
+                  <>
+                    <Spinner /> {t("loadingArchive")}
+                  </>
+                ) : (
+                  t("open")
+                )}
               </Button>
             </Flex>
           </form>
@@ -488,9 +628,20 @@ function AppContent() {
       <JobDrawer
         onOpenArchive={openArchivePath}
         onCreatedArchive={refreshBootstrap}
-        onViewVerification={(jobId, report) =>
-          setVerificationResult({ jobId, report })
-        }
+        onViewVerification={(jobId, report) => {
+          verificationFocusReturnRef.current = document.querySelector(
+            "[data-testid='job-center-open']",
+          );
+          setVerificationResult({ jobId, report });
+        }}
+        onViewComparison={(jobId, result) => {
+          setComparisonView({
+            jobId,
+            result,
+            returnView: openArchive ? "browser" : "home",
+          });
+          setView("compare");
+        }}
       />
       {verificationResult && (
         <VerificationResultsDialog
@@ -499,6 +650,12 @@ function AppContent() {
           report={verificationResult.report}
           onOpenChange={(open) => {
             if (!open) setVerificationResult(undefined);
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            requestAnimationFrame(() =>
+              verificationFocusReturnRef.current?.focus(),
+            );
           }}
         />
       )}
@@ -513,6 +670,7 @@ interface HomeViewProps {
   onDismissError: () => void;
   onOpen: () => void;
   onCreate: () => void;
+  onCompare: () => void;
   onOpenRecent: (path: string) => void;
   onRemoveRecent: (path: string) => void;
 }
@@ -524,6 +682,7 @@ function HomeView({
   onDismissError,
   onOpen,
   onCreate,
+  onCompare,
   onOpenRecent,
   onRemoveRecent,
 }: HomeViewProps) {
@@ -533,7 +692,12 @@ function HomeView({
 
   return (
     <div className={styles.shell} data-testid="home-view">
-      <AppToolbar title={productName} onOpen={onOpen} onCreate={onCreate} />
+      <AppToolbar
+        title={productName}
+        onOpen={onOpen}
+        onCreate={onCreate}
+        onCompare={onCompare}
+      />
       {error && (
         <ErrorBanner
           error={error}
@@ -585,6 +749,16 @@ function HomeView({
               <span>
                 <strong>{t("createArchive")}</strong>
                 <small>{t("createArchiveDescription")}</small>
+              </span>
+              <ArrowRightIcon aria-hidden="true" />
+            </button>
+            <button className={styles.actionCard} onClick={onCompare}>
+              <span className={styles.actionIcon}>
+                <MixerHorizontalIcon aria-hidden="true" />
+              </span>
+              <span>
+                <strong>{t("compareArchives")}</strong>
+                <small>{t("comparisonDescription")}</small>
               </span>
               <ArrowRightIcon aria-hidden="true" />
             </button>
@@ -699,6 +873,7 @@ interface BrowserViewProps {
   onHome: () => void;
   onOpen: () => void;
   onError: (error: AppErrorDto) => void;
+  onCompare: () => void;
   sessionPassword?: string;
 }
 
@@ -709,6 +884,7 @@ function BrowserView({
   onHome,
   onOpen,
   onError,
+  onCompare,
   sessionPassword,
 }: BrowserViewProps) {
   const { locale, t } = useI18n();
@@ -750,6 +926,22 @@ function BrowserView({
   const [editError, setEditError] = useState<AppErrorDto>();
   const [toolsOpen, setToolsOpen] = useState(false);
   const [verificationOpen, setVerificationOpen] = useState(false);
+  const dialogFocusReturnRef = useRef<HTMLElement | null>(null);
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null);
+  const captureDialogFocus = (target?: HTMLElement | null) => {
+    dialogFocusReturnRef.current =
+      target ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+  };
+  const restoreDialogFocus = (event: Event) => {
+    event.preventDefault();
+    const target = dialogFocusReturnRef.current;
+    requestAnimationFrame(() => {
+      if (target?.isConnected) target.focus();
+    });
+  };
 
   const currentTrail = history[historyIndex];
   const current = currentTrail[currentTrail.length - 1];
@@ -765,11 +957,13 @@ function BrowserView({
         return;
       if (event.key === "F2") {
         event.preventDefault();
+        captureDialogFocus();
         setEditError(undefined);
         setRenameValue(details.entry.name);
         setRenameOpen(true);
       } else if (event.key === "Delete") {
         event.preventDefault();
+        captureDialogFocus();
         setEditError(undefined);
         setDeleteOpen(true);
       }
@@ -921,7 +1115,10 @@ function BrowserView({
           className={styles.toolbarButton}
           aria-label={t("addFilesToArchive")}
           title={t("addFilesToArchive")}
-          onClick={() => setAppendOpen(true)}
+          onClick={(event) => {
+            captureDialogFocus(event.currentTarget);
+            setAppendOpen(true);
+          }}
         >
           <PlusIcon aria-hidden="true" />
           <span className={styles.toolbarLabel}>{t("addFilesToArchive")}</span>
@@ -930,7 +1127,10 @@ function BrowserView({
           className={styles.toolbarButton}
           aria-label={t("extract")}
           title={t("extract")}
-          onClick={() => setExtractOpen(true)}
+          onClick={(event) => {
+            captureDialogFocus(event.currentTarget);
+            setExtractOpen(true);
+          }}
         >
           <DownloadIcon aria-hidden="true" />
           <span className={styles.toolbarLabel}>{t("extract")}</span>
@@ -939,7 +1139,10 @@ function BrowserView({
           className={`${styles.toolbarButton} ${styles.toolbarButtonPersistent}`}
           aria-label={t("verifyArchive")}
           title={t("verifyArchive")}
-          onClick={() => setVerificationOpen(true)}
+          onClick={(event) => {
+            captureDialogFocus(event.currentTarget);
+            setVerificationOpen(true);
+          }}
         >
           <CheckCircledIcon aria-hidden="true" />
           <span
@@ -951,6 +1154,7 @@ function BrowserView({
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
             <button
+              ref={moreButtonRef}
               className={`${styles.toolbarButton} ${styles.toolbarButtonSecondary}`}
               aria-label={t("more")}
               title={t("more")}
@@ -967,6 +1171,7 @@ function BrowserView({
             <DropdownMenu.Item
               disabled={!details}
               onSelect={() => {
+                captureDialogFocus(moreButtonRef.current);
                 setEditError(undefined);
                 setRenameValue(details?.entry.name ?? "");
                 setRenameOpen(true);
@@ -978,6 +1183,7 @@ function BrowserView({
               color="red"
               disabled={!details}
               onSelect={() => {
+                captureDialogFocus(moreButtonRef.current);
                 setEditError(undefined);
                 setDeleteOpen(true);
               }}
@@ -985,7 +1191,15 @@ function BrowserView({
               <TrashIcon aria-hidden="true" /> {t("delete")}
             </DropdownMenu.Item>
             <DropdownMenu.Separator />
-            <DropdownMenu.Item onSelect={() => setToolsOpen(true)}>
+            <DropdownMenu.Item onSelect={onCompare}>
+              <MixerHorizontalIcon aria-hidden="true" /> {t("compareArchives")}
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              onSelect={() => {
+                captureDialogFocus(moreButtonRef.current);
+                setToolsOpen(true);
+              }}
+            >
               <MixerHorizontalIcon aria-hidden="true" /> {t("archiveTools")}
             </DropdownMenu.Item>
           </DropdownMenu.Content>
@@ -1216,7 +1430,9 @@ function BrowserView({
                     <td className={styles.numeric}>
                       {formatOptionalBytes(entry.storedBytes, locale)}
                     </td>
-                    <td>{entry.compression ?? "—"}</td>
+                    <td title={entry.compression ?? undefined}>
+                      {entry.compression ?? "—"}
+                    </td>
                     <td>{localizeEncryption(entry.encryption, t)}</td>
                     <td>{formatOptionalDate(entry.modifiedAt, locale)}</td>
                   </tr>
@@ -1259,11 +1475,13 @@ function BrowserView({
         archive={archive}
         selectedPath={details?.entry.path}
         onOpenChange={setExtractOpen}
+        onCloseAutoFocus={restoreDialogFocus}
       />
       <AppendDialog
         open={appendOpen}
         archive={archive}
         onOpenChange={setAppendOpen}
+        onCloseAutoFocus={restoreDialogFocus}
       />
       <VerificationDialog
         open={verificationOpen}
@@ -1274,6 +1492,7 @@ function BrowserView({
         )}
         sessionPassword={sessionPassword}
         onOpenChange={setVerificationOpen}
+        onCloseAutoFocus={restoreDialogFocus}
       />
       <Dialog.Root
         open={renameOpen}
@@ -1285,7 +1504,7 @@ function BrowserView({
           }
         }}
       >
-        <Dialog.Content maxWidth="480px">
+        <Dialog.Content maxWidth="480px" onCloseAutoFocus={restoreDialogFocus}>
           <Dialog.Title>{t("renameArchiveEntry")}</Dialog.Title>
           <Dialog.Description>{details?.entry.path ?? ""}</Dialog.Description>
           <div className={styles.extractForm}>
@@ -1380,7 +1599,10 @@ function BrowserView({
           }
         }}
       >
-        <AlertDialog.Content maxWidth="480px">
+        <AlertDialog.Content
+          maxWidth="480px"
+          onCloseAutoFocus={restoreDialogFocus}
+        >
           <AlertDialog.Title>
             {t("deleteFromArchiveQuestion")}
           </AlertDialog.Title>
@@ -1448,6 +1670,7 @@ function BrowserView({
         open={toolsOpen}
         archive={archive}
         onOpenChange={setToolsOpen}
+        onCloseAutoFocus={restoreDialogFocus}
       />
     </div>
   );
@@ -1459,10 +1682,12 @@ function ArchiveToolsDialog({
   open,
   archive,
   onOpenChange,
+  onCloseAutoFocus,
 }: {
   open: boolean;
   archive: OpenArchiveResult;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const { t } = useI18n();
   const [operation, setOperation] = useState<ArchiveTool>("split");
@@ -1606,7 +1831,7 @@ function ArchiveToolsDialog({
         }
       }}
     >
-      <Dialog.Content maxWidth="560px">
+      <Dialog.Content maxWidth="560px" onCloseAutoFocus={onCloseAutoFocus}>
         <Dialog.Title>{t("archiveTools")}</Dialog.Title>
         <Dialog.Description>{t("archiveToolsDescription")}</Dialog.Description>
         <div className={styles.extractForm}>
@@ -1775,10 +2000,12 @@ function AppendDialog({
   open,
   archive,
   onOpenChange,
+  onCloseAutoFocus,
 }: {
   open: boolean;
   archive: OpenArchiveResult;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const { t } = useI18n();
   const [sources, setSources] = useState<string[]>([]);
@@ -1858,7 +2085,7 @@ function AppendDialog({
         if (!nextOpen) setSubmitError(undefined);
       }}
     >
-      <Dialog.Content maxWidth="560px">
+      <Dialog.Content maxWidth="560px" onCloseAutoFocus={onCloseAutoFocus}>
         <Dialog.Title>{t("addToArchive")}</Dialog.Title>
         <Dialog.Description>{t("addToArchiveDescription")}</Dialog.Description>
         <div className={styles.extractForm}>
@@ -1923,11 +2150,13 @@ function ExtractDialog({
   archive,
   selectedPath,
   onOpenChange,
+  onCloseAutoFocus,
 }: {
   open: boolean;
   archive: OpenArchiveResult;
   selectedPath?: string;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const { t } = useI18n();
   const [destination, setDestination] = useState("");
@@ -2005,7 +2234,7 @@ function ExtractDialog({
         if (!nextOpen) setSubmitError(undefined);
       }}
     >
-      <Dialog.Content maxWidth="520px">
+      <Dialog.Content maxWidth="520px" onCloseAutoFocus={onCloseAutoFocus}>
         <Dialog.Title>{t("extractArchive")}</Dialog.Title>
         <Dialog.Description>{t("extractDescription")}</Dialog.Description>
         <div className={styles.extractForm}>
@@ -2131,10 +2360,12 @@ function AppToolbar({
   title,
   onOpen,
   onCreate,
+  onCompare,
 }: {
   title: string;
   onOpen: () => void;
   onCreate: () => void;
+  onCompare: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -2149,6 +2380,9 @@ function AppToolbar({
       </button>
       <button className={styles.toolbarButton} onClick={onOpen}>
         <FolderGlyph /> {t("open")}
+      </button>
+      <button className={styles.toolbarButton} onClick={onCompare}>
+        <MixerHorizontalIcon aria-hidden="true" /> {t("comparison")}
       </button>
       <div className={styles.toolbarSpacer} />
       <span className={styles.phaseLabel}>{t("archiveBrowser")}</span>

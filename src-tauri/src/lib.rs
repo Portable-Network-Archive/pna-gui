@@ -1,5 +1,6 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod comparison;
 mod jobs;
 mod operations;
 mod reader;
@@ -112,6 +113,16 @@ start_job_command!(
 );
 start_job_command!(job_start_migrate, operations::MigrateRequest, Migrate);
 start_job_command!(job_start_verify, verification::VerifyRequest, Verify);
+start_job_command!(job_start_compare, comparison::CompareRequest, Compare);
+
+#[tauri::command]
+fn comparison_page(
+    jobs: State<'_, jobs::JobManager>,
+    request: comparison::ComparisonPageRequest,
+) -> Result<comparison::ComparisonPage, String> {
+    jobs.comparison_page(&request)
+        .map_err(|error| error.to_string())
+}
 
 #[tauri::command]
 fn report_export_verification(
@@ -560,6 +571,9 @@ fn prepare_safe_file_path(
 const MENU_UPDATE_CHECK: &str = "update check";
 const MENU_EXTRACT_TAB: &str = "extract tab";
 const MENU_CREATE_TAB: &str = "create tab";
+const MENU_ZOOM_IN: &str = "zoom in";
+const MENU_ZOOM_OUT: &str = "zoom out";
+const MENU_ZOOM_RESET: &str = "actual size";
 
 const TRAY_UPDATE_CHECK: &str = "tray_update_check";
 const TRAY_EXTRACT_TAB: &str = "tray_extract_tab";
@@ -620,6 +634,39 @@ pub fn run() {
                     "Ctrl+2"
                 }),
             )?;
+            let zoom_in = MenuItem::with_id(
+                app,
+                MENU_ZOOM_IN,
+                "Zoom In",
+                true,
+                Some(if cfg!(target_os = "macos") {
+                    "Cmd+="
+                } else {
+                    "Ctrl+="
+                }),
+            )?;
+            let zoom_out = MenuItem::with_id(
+                app,
+                MENU_ZOOM_OUT,
+                "Zoom Out",
+                true,
+                Some(if cfg!(target_os = "macos") {
+                    "Cmd+-"
+                } else {
+                    "Ctrl+-"
+                }),
+            )?;
+            let zoom_reset = MenuItem::with_id(
+                app,
+                MENU_ZOOM_RESET,
+                "Actual Size",
+                true,
+                Some(if cfg!(target_os = "macos") {
+                    "Cmd+0"
+                } else {
+                    "Ctrl+0"
+                }),
+            )?;
 
             #[cfg(target_os = "macos")]
             let app_menu = {
@@ -647,7 +694,11 @@ pub fn run() {
                     .paste()
                     .select_all()
                     .build()?;
-                let view_submenu = SubmenuBuilder::new(app, "View").fullscreen().build()?;
+                let view_submenu = SubmenuBuilder::new(app, "View")
+                    .items(&[&zoom_in, &zoom_out, &zoom_reset])
+                    .separator()
+                    .fullscreen()
+                    .build()?;
                 let window_submenu =
                     SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, "Window")
                         .items(&[&extract_tab, &create_tab])
@@ -676,11 +727,19 @@ pub fn run() {
                 let tools_submenu = SubmenuBuilder::new(app, "Tools")
                     .item(&update_check)
                     .build()?;
+                let view_submenu = SubmenuBuilder::new(app, "View")
+                    .items(&[&zoom_in, &zoom_out, &zoom_reset])
+                    .build()?;
                 let window_submenu = SubmenuBuilder::new(app, "Window")
                     .items(&[&extract_tab, &create_tab])
                     .build()?;
                 MenuBuilder::new(app)
-                    .items(&[&file_submenu, &tools_submenu, &window_submenu])
+                    .items(&[
+                        &file_submenu,
+                        &view_submenu,
+                        &tools_submenu,
+                        &window_submenu,
+                    ])
                     .build()?
             };
 
@@ -696,6 +755,15 @@ pub fn run() {
                     }
                     MENU_CREATE_TAB => {
                         handle.emit("switch_tab", "create").unwrap();
+                    }
+                    MENU_ZOOM_IN => {
+                        handle.emit("view-zoom", "in").unwrap();
+                    }
+                    MENU_ZOOM_OUT => {
+                        handle.emit("view-zoom", "out").unwrap();
+                    }
+                    MENU_ZOOM_RESET => {
+                        handle.emit("view-zoom", "reset").unwrap();
                     }
                     _ => {}
                 };
@@ -752,6 +820,8 @@ pub fn run() {
             job_start_strip_metadata,
             job_start_migrate,
             job_start_verify,
+            job_start_compare,
+            comparison_page,
             verification::verification_source_matches,
             report_export_verification,
             reports::report_reveal_export,

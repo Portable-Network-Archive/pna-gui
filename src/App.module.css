@@ -799,21 +799,24 @@
 }
 
 .listPanel .table th:nth-child(1) {
-  width: 26%;
+  width: 28%;
 }
 
 .listPanel .table th:nth-child(2) {
-  width: 12%;
+  width: 10%;
 }
 
 .listPanel .table th:nth-child(3),
 .listPanel .table th:nth-child(4) {
-  width: 12%;
+  width: 11%;
 }
 
-.listPanel .table th:nth-child(5),
+.listPanel .table th:nth-child(5) {
+  width: 14%;
+}
+
 .listPanel .table th:nth-child(6) {
-  width: 11%;
+  width: 10%;
 }
 
 .listPanel .table th:nth-child(7) {

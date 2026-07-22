@@ -45,11 +45,13 @@ export default function VerificationResultsDialog({
   jobId,
   report,
   onOpenChange,
+  onCloseAutoFocus,
 }: {
   open: boolean;
   jobId: string;
   report: VerificationReport;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const { locale, t } = useI18n();
   const [freshness, setFreshness] = useState<Freshness>("loading");
@@ -154,7 +156,11 @@ export default function VerificationResultsDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className={styles.dialog} maxWidth="680px">
+      <Dialog.Content
+        className={styles.dialog}
+        maxWidth="680px"
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
         <Dialog.Title>{t("verificationResults")}</Dialog.Title>
         <Dialog.Description
           className={styles.source}

@@ -512,7 +512,13 @@ export default function Create() {
         <span />
         {step < 3 ? (
           <Button
-            disabled={step === 1 && sources.length === 0}
+            disabled={
+              (step === 1 && sources.length === 0) ||
+              (step === 2 && Boolean(validation))
+            }
+            aria-describedby={
+              step === 2 && validation ? "create-validation" : undefined
+            }
             onClick={() => setStep((step + 1) as 2 | 3)}
           >
             {t("next")}

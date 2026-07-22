@@ -17,6 +17,19 @@
   background: #fbfcfd;
 }
 
+.bar[data-active="false"] {
+  grid-template-columns: 180px minmax(0, 1fr);
+  min-height: 44px;
+}
+
+.bar[data-active="false"] .summary {
+  padding-block: 6px;
+}
+
+.bar[data-active="false"] .job {
+  padding-block: 5px;
+}
+
 .summary {
   display: flex;
   width: 100%;
@@ -235,6 +248,49 @@
   font-variant-numeric: tabular-nums;
 }
 
+.centerFilters {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 150px 180px;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.centerFilters label {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: var(--app-muted);
+  font-size: 11px;
+}
+
+.centerFilters input,
+.centerFilters select {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 5px;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12px;
+  background: #fff;
+}
+
+.centerFilters input:focus-visible,
+.centerFilters select:focus-visible {
+  border-color: var(--app-blue);
+  outline: 2px solid color-mix(in srgb, var(--app-blue) 28%, transparent);
+  outline-offset: 1px;
+}
+
+.filteredCount {
+  margin: 10px 0 4px;
+  color: var(--app-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .centerList {
   max-height: min(430px, 58dvh);
   overflow: auto;
@@ -244,6 +300,23 @@
   min-height: 74px;
   padding-inline: 4px;
   border-bottom: 1px solid var(--app-border);
+}
+
+.jobGroup h3 {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  margin: 0;
+  padding: 8px 4px 6px;
+  border-bottom: 1px solid var(--app-border);
+  color: #475467;
+  font-size: 11px;
+  background: var(--color-panel-solid, #fff);
+}
+
+.showMore {
+  display: flex;
+  margin: 12px auto 4px;
 }
 
 .actionError {
@@ -288,9 +361,14 @@
   outline-offset: 1px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .bar {
     grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .bar[data-active="false"] {
+    grid-template-columns: 54px minmax(0, 1fr);
+    min-height: 40px;
   }
 
   .summary {
@@ -311,5 +389,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .centerFilters {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .centerFilters label:first-child {
+    grid-column: 1 / -1;
   }
 }

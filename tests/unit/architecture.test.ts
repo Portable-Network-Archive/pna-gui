@@ -70,6 +70,24 @@ describe("shipped feature boundaries", () => {
     expect(jobs).toContain("Self::Verify(_) => None");
   });
 
+  it("registers read-only comparison with paged results and no inferred history", () => {
+    // ARCH-COMPARE-IPC-REGISTERED, ARCH-COMPARE-NO-PREVIOUS-INFERENCE
+    const backend = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
+    const jobs = readFileSync(resolve(root, "src-tauri/src/jobs.rs"), "utf8");
+    const comparisonView = readFileSync(
+      resolve(root, "src/features/comparison/ComparisonView.tsx"),
+      "utf8",
+    );
+    for (const command of ["job_start_compare", "comparison_page"]) {
+      expect(backend).toMatch(
+        new RegExp(`generate_handler!\\[[\\s\\S]*\\b${command},?`),
+      );
+    }
+    expect(jobs).toContain("Compare(CompareRequest)");
+    expect(jobs).toContain("Self::Compare(_) => None");
+    expect(comparisonView).not.toMatch(/\b(previous|history)\b/i);
+  });
+
   it("registers bounded verification report export and reveal commands", () => {
     // ARCH-REPORT-IPC-REGISTERED
     const backend = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
@@ -228,11 +246,34 @@ describe("shipped feature boundaries", () => {
     );
     expect(migrated.permissions).toEqual([
       "core:default",
+      "core:webview:allow-set-webview-zoom",
       "fs:allow-read-dir",
       "dialog:allow-open",
       "dialog:allow-save",
     ]);
     expect(desktop.permissions).toEqual(["cli:default"]);
+  });
+
+  it("exposes native zoom commands without granting unrelated webview capabilities", () => {
+    // UI-VIEW-ZOOM-MENU
+    const backend = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
+    const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+    for (const id of ["MENU_ZOOM_IN", "MENU_ZOOM_OUT", "MENU_ZOOM_RESET"]) {
+      expect(backend).toContain(id);
+    }
+    expect(backend).toContain('emit("view-zoom"');
+    expect(app).toContain('listen<"in" | "out" | "reset">');
+    expect(app).toContain("getCurrentWebview().setZoom(next)");
+  });
+
+  it("allocates enough browser-list width to name the compression method", () => {
+    // UI-BROWSER-COMPRESSION-READABLE
+    const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+    const css = readFileSync(resolve(root, "src/App.module.css"), "utf8");
+    expect(css).toMatch(
+      /\.listPanel \.table th:nth-child\(5\)\s*\{[^}]*width:\s*14%/s,
+    );
+    expect(app).toContain("title={entry.compression ?? undefined}");
   });
 
   it("runs the desktop E2E layer inside the existing CI matrix", () => {
@@ -277,7 +318,7 @@ describe("shipped feature boundaries", () => {
     ]) {
       expect(app).toMatch(
         new RegExp(
-          `aria-label=\\{t\\("${command}"\\)\\}[\\s\\S]{0,240}toolbarLabel`,
+          `aria-label=\\{t\\("${command}"\\)\\}[\\s\\S]{0,520}toolbarLabel`,
         ),
       );
     }
