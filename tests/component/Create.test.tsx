@@ -202,16 +202,12 @@ describe("archive creation wizard", () => {
       screen.getByRole("combobox", { name: "Encryption" }),
       "aes",
     );
-    await userEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(
       screen.getByText(
         "Enter a password before creating an encrypted archive.",
       ),
     ).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Start creating" }),
-    ).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
     await userEvent.type(screen.getByLabelText("Password"), "secret");
     await userEvent.type(screen.getByLabelText("Confirm password"), "secret");
     await userEvent.click(screen.getByRole("button", { name: "Next" }));

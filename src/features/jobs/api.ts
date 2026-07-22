@@ -50,6 +50,51 @@ export interface VerificationReport {
   checks: VerificationCheck[];
 }
 
+export type CompareSourceKind = "archive" | "folder";
+export type DifferenceKind =
+  | "same"
+  | "added"
+  | "removed"
+  | "content_changed"
+  | "metadata_changed"
+  | "comparison_unavailable";
+
+export interface ComparisonSource {
+  kind: CompareSourceKind;
+  path: string;
+  password: string | null;
+}
+
+export interface CompareJobRequest {
+  left: ComparisonSource;
+  right: ComparisonSource;
+}
+
+export interface ComparisonSummary {
+  total: number;
+  same: number;
+  added: number;
+  removed: number;
+  contentChanged: number;
+  metadataChanged: number;
+  comparisonUnavailable: number;
+}
+
+export interface ComparisonSourceStamp {
+  kind: CompareSourceKind;
+  path: string;
+  size: number;
+  modifiedAt?: number | null;
+  sha256: string;
+}
+
+export interface ComparisonResult {
+  left: ComparisonSourceStamp;
+  right: ComparisonSourceStamp;
+  completedAt: number;
+  summary: ComparisonSummary;
+}
+
 export interface JobSnapshot {
   id: string;
   kind:
@@ -63,7 +108,8 @@ export interface JobSnapshot {
     | "sort"
     | "strip"
     | "migrate"
-    | "verify";
+    | "verify"
+    | "compare";
   status: JobStatus;
   phase: string;
   currentItem?: string | null;
@@ -76,6 +122,7 @@ export interface JobSnapshot {
   retryable?: boolean;
   warnings?: JobWarning[];
   verificationReport?: VerificationReport | null;
+  comparisonReport?: ComparisonResult | null;
 }
 
 export interface JobWarning {
@@ -236,6 +283,8 @@ export const jobApi = {
     mode: VerificationMode;
   }) =>
     invokeSingleFlight<JobSnapshot>("job_start_verify", request, { request }),
+  startCompare: (request: CompareJobRequest) =>
+    invokeSingleFlight<JobSnapshot>("job_start_compare", request, { request }),
   /** null when freshness could not be determined (no modification stamp). */
   verificationSourceMatches: (report: VerificationReport) =>
     invoke<boolean | null>("verification_source_matches", {

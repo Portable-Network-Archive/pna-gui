@@ -23,9 +23,13 @@ const bridge = vi.hoisted(() => ({
     | ((event: { payload: "extract" | "create" }) => void)
     | undefined,
   jobHandlers: [] as Array<(event: { payload: JobSnapshot }) => void>,
+  setZoom: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: bridge.invoke }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ setZoom: bridge.setZoom }),
+}));
 vi.mock("@tauri-apps/plugin-cli", () => ({ getMatches: bridge.getMatches }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: bridge.openDialog,
@@ -182,6 +186,10 @@ function installInvokeHandler(options?: {
           return { id: "job-migrate", kind: "migrate", status: "queued" };
         case "job_start_verify":
           return { id: "job-verify", kind: "verify", status: "queued" };
+        case "job_start_compare":
+          return { id: "job-compare", kind: "compare", status: "queued" };
+        case "comparison_page":
+          return { items: [], nextCursor: null, totalCount: 0 };
         case "job_list":
           return [];
         default:
@@ -233,6 +241,7 @@ describe("application shell", () => {
     bridge.dragHandlers = [];
     bridge.menuHandler = undefined;
     bridge.jobHandlers = [];
+    bridge.setZoom.mockReset().mockResolvedValue(undefined);
     document.documentElement.lang = "en";
   });
 
@@ -251,6 +260,32 @@ describe("application shell", () => {
         mode: "quick",
       },
     });
+  });
+
+  it("[UI-COMPARE-HOME-ENTRY] exposes explicit A/B comparison without a previous-version shortcut", async () => {
+    await renderHome();
+    await userEvent.click(
+      screen.getByRole("button", { name: /Compare archives/ }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Compare archives" }),
+    ).toBeVisible();
+    expect(screen.getByText("A — Baseline")).toBeVisible();
+    expect(screen.getByText("B — Comparison")).toBeVisible();
+    expect(screen.queryByText(/previous/i)).not.toBeInTheDocument();
+  });
+
+  it("[UI-COMPARE-BROWSER-ENTRY] carries the open archive into explicit source A", async () => {
+    await openRecentArchive();
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    await userEvent.click(
+      screen.getByRole("menuitem", { name: "Compare archives" }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Compare archives" }),
+    ).toBeVisible();
+    expect(screen.getByText(recent.path)).toBeVisible();
+    expect(screen.getByText("B — Comparison")).toBeVisible();
   });
 
   it("[UI-VERIFY-NONINTERRUPTIVE-COMPLETE] retains a completed result without stealing focus", async () => {
@@ -1155,6 +1190,107 @@ describe("application shell", () => {
     expect(submit).toBeDisabled();
     await userEvent.type(within(dialog).getByLabelText("Password"), "secret");
     expect(submit).toBeEnabled();
+  });
+
+  it("[UI-OPEN-WRONG-PASSWORD-RECOVERY] reports a wrong password and keeps the form reusable", async () => {
+    installInvokeHandler({ recentItems: [recent] });
+    const originalInvoke = bridge.invoke.getMockImplementation()!;
+    let attempt = 0;
+    bridge.invoke.mockImplementation(
+      async (command: string, args?: Record<string, unknown>) => {
+        if (command === "archive_open") {
+          attempt += 1;
+          if (attempt === 1) {
+            throw {
+              code: "PASSWORD_REQUIRED",
+              message: "password required",
+              retryable: true,
+            };
+          }
+          if (attempt === 2) {
+            throw {
+              code: "WRONG_PASSWORD",
+              message: "wrong password",
+              retryable: true,
+            };
+          }
+          return { handle: summary.handle, summary };
+        }
+        return originalInvoke(command, args);
+      },
+    );
+    renderApp();
+    const recentButton = await screen.findByRole("button", {
+      name: /^demo\.pna \/tmp\/demo\.pna$/,
+    });
+    await userEvent.click(recentButton);
+    const password = await screen.findByLabelText("Password");
+    await userEvent.type(password, "wrong");
+    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    expect(
+      await screen.findByText(
+        "The password is incorrect or the encrypted data could not be read.",
+      ),
+    ).toBeVisible();
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveValue("wrong");
+    expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
+
+    await userEvent.clear(password);
+    await userEvent.type(password, "secret");
+    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(
+      await screen.findByRole("button", { name: "Open another archive" }),
+    ).toBeVisible();
+  });
+
+  it("[UI-DIALOG-FOCUS-RETURN] restores the password trigger after Escape", async () => {
+    installInvokeHandler({
+      recentItems: [recent],
+      openError: {
+        code: "PASSWORD_REQUIRED",
+        message: "password required",
+        retryable: true,
+      },
+    });
+    renderApp();
+    const recentButton = await screen.findByRole("button", {
+      name: /^demo\.pna \/tmp\/demo\.pna$/,
+    });
+    await userEvent.click(recentButton);
+    await screen.findByRole("dialog", { name: "Password required" });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(recentButton).toHaveFocus());
+  });
+
+  it("[UI-BROWSER-DIALOG-FOCUS-RETURN] restores an archive command after Escape", async () => {
+    await openRecentArchive();
+    const extract = screen.getByRole("button", { name: "Extract" });
+    await userEvent.click(extract);
+    await screen.findByRole("dialog", { name: "Extract archive" });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(extract).toHaveFocus());
+  });
+
+  it("[UI-VIEW-ZOOM-SHORTCUTS] supports zoom in, out, and actual size", async () => {
+    await renderHome();
+    act(() => {
+      window.dispatchEvent(
+        new globalThis.KeyboardEvent("keydown", { metaKey: true, key: "+" }),
+      );
+      window.dispatchEvent(
+        new globalThis.KeyboardEvent("keydown", { metaKey: true, key: "-" }),
+      );
+      window.dispatchEvent(
+        new globalThis.KeyboardEvent("keydown", { metaKey: true, key: "0" }),
+      );
+    });
+    await waitFor(() => {
+      expect(bridge.setZoom).toHaveBeenNthCalledWith(1, 1.1);
+      expect(bridge.setZoom).toHaveBeenNthCalledWith(2, 1);
+      expect(bridge.setZoom).toHaveBeenNthCalledWith(3, 1);
+    });
   });
 
   it("[UI-UX-OPEN-ERROR-RECOVERY] names the failed archive, offers recovery, and dismisses with Escape", async () => {

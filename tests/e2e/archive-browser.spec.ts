@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { resolve } from "node:path";
 import type { VerificationReport } from "../../src/features/jobs/api";
+import type { ComparisonResult } from "../../src/features/jobs/api";
 
 async function invokeTauri<T>(command: string, args?: Record<string, unknown>) {
   return browser.execute(
@@ -47,6 +48,7 @@ async function waitForJob(jobId: string) {
       status: string;
       error?: string;
       verificationReport?: VerificationReport;
+      comparisonReport?: ComparisonResult;
     }>
   >("job_list");
   return jobs.find((job) => job.id === jobId)!;
@@ -140,11 +142,23 @@ describe("Tauri archive browser", () => {
     expect((await waitForJob(create.id)).status).toBe("succeeded");
     expect(existsSync(archive)).toBe(true);
 
-    const openCreated = $('[data-testid="open-created-archive"]');
+    await $('[data-testid="job-center-open"]').click();
+    const createJob = $(`[data-job-id="${create.id}"]`);
+    await createJob.waitForDisplayed();
+    const openCreated = createJob.$('[data-job-action="open-output"]');
     await openCreated.waitForDisplayed();
     await openCreated.click();
+    await browser.waitUntil(
+      () =>
+        $('input[name="archive-password"]')
+          .isDisplayed()
+          .catch(() => false),
+      {
+        timeout: 30_000,
+        timeoutMsg: "created archive password prompt did not open",
+      },
+    );
     const createdPassword = $('input[name="archive-password"]');
-    await createdPassword.waitForDisplayed();
     await createdPassword.setValue("secret");
     await $('[data-testid="archive-password-submit"]').click();
     await $('[data-testid="archive-browser"]').waitForDisplayed({
@@ -318,5 +332,85 @@ describe("Tauri archive browser", () => {
     expect(wrongResult.verificationReport?.checks).toContainEqual(
       expect.objectContaining({ code: "file_contents", status: "failed" }),
     );
+  });
+
+  it("compares real archives read-only and opens the paged result from the Job Center", async () => {
+    // E2E-COMPARE-READ-ONLY-RESULT
+    const runtime = resolve(import.meta.dirname, "../../.e2e/runtime-compare");
+    rmSync(runtime, { recursive: true, force: true });
+    const leftSourceDirectory = resolve(runtime, "left");
+    const rightSourceDirectory = resolve(runtime, "right");
+    mkdirSync(leftSourceDirectory, { recursive: true });
+    mkdirSync(rightSourceDirectory, { recursive: true });
+    const leftSource = resolve(leftSourceDirectory, "shared.txt");
+    const rightSource = resolve(rightSourceDirectory, "shared.txt");
+    const leftArchive = resolve(runtime, "left.pna");
+    const rightArchive = resolve(runtime, "right.pna");
+    writeFileSync(leftSource, "before comparison\n");
+    writeFileSync(rightSource, "after comparison\n");
+
+    for (const [source, outputPath] of [
+      [leftSource, leftArchive],
+      [rightSource, rightArchive],
+    ]) {
+      const create = await invokeTauri<{ id: string }>("job_start_create", {
+        request: {
+          sources: [source],
+          outputPath,
+          overwrite: false,
+          options: {
+            solid: false,
+            compression: "zstd",
+            encryption: "none",
+            password: null,
+            preservePermissions: true,
+            reproducible: false,
+          },
+        },
+      });
+      expect((await waitForJob(create.id)).status).toBe("succeeded");
+    }
+    const leftBefore = readFileSync(leftArchive);
+    const rightBefore = readFileSync(rightArchive);
+
+    const comparison = await invokeTauri<{ id: string }>("job_start_compare", {
+      request: {
+        left: { kind: "archive", path: leftArchive, password: null },
+        right: { kind: "archive", path: rightArchive, password: null },
+      },
+    });
+    const completed = await waitForJob(comparison.id);
+    expect(completed.status).toBe("succeeded");
+    expect(completed.comparisonReport?.summary.contentChanged).toBe(1);
+    const page = await invokeTauri<{
+      items: Array<{ path: string; kind: string }>;
+    }>("comparison_page", {
+      request: {
+        jobId: comparison.id,
+        kinds: ["content_changed"],
+        query: "shared",
+        cursor: null,
+        limit: 20,
+      },
+    });
+    expect(page.items).toEqual([
+      expect.objectContaining({
+        path: "shared.txt",
+        kind: "content_changed",
+      }),
+    ]);
+    expect(readFileSync(leftArchive)).toEqual(leftBefore);
+    expect(readFileSync(rightArchive)).toEqual(rightBefore);
+
+    await $('[data-testid="job-center-open"]').click();
+    const comparisonJob = $(`[data-job-id="${comparison.id}"]`);
+    await comparisonJob.waitForDisplayed();
+    const viewResult = comparisonJob.$('[data-job-action="view-comparison"]');
+    await viewResult.waitForDisplayed({ timeout: 30_000 });
+    await viewResult.click();
+    await $('[data-testid="comparison-results-view"]').waitForDisplayed({
+      timeout: 30_000,
+    });
+    await expect($('[data-comparison-path="shared.txt"]')).toBeDisplayed();
   });
 });
