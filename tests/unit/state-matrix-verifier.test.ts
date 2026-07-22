@@ -104,7 +104,7 @@ describe("state matrix verifier", () => {
       join(root, "src/features/jobs/api.ts"),
       realJobApi.replace(
         /\n};\s*$/,
-        '\n  startCompare: () => invoke("job_start_compare"),\n};\n',
+        '\n  startFutureJob: () => invoke("job_start_future_job"),\n};\n',
       ),
     );
     writeFileSync(
@@ -113,7 +113,7 @@ describe("state matrix verifier", () => {
     );
 
     expect(validateInvariantCensus(matrix, root)).toContain(
-      "Job API startCompare has no single-flight invariant mapping or explicit read-only exclusion.",
+      "Job API startFutureJob has no single-flight invariant mapping or explicit read-only exclusion.",
     );
   });
 

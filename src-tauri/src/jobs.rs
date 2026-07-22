@@ -1,7 +1,7 @@
 use std::{
     any::Any,
-    collections::BTreeMap,
-    io,
+    collections::{BTreeMap, HashMap},
+    fs, io,
     panic::{catch_unwind, AssertUnwindSafe},
     path::PathBuf,
     sync::{
@@ -13,6 +13,7 @@ use std::{
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::comparison::{CompareRequest, ComparisonReport, ComparisonResult};
 use crate::operations::{
     AppendRequest, ConcatRequest, CreateRequest, DeleteEntriesRequest, ExtractRequest,
     MigrateRequest, RenameEntryRequest, SortRequest, SplitRequest, StripMetadataRequest,
@@ -45,6 +46,7 @@ pub enum JobKind {
     Strip,
     Migrate,
     Verify,
+    Compare,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -66,6 +68,8 @@ pub struct JobSnapshot {
     pub warnings: Vec<crate::operations::OperationWarning>,
     #[serde(default)]
     pub verification_report: Option<VerificationReport>,
+    #[serde(default)]
+    pub comparison_report: Option<ComparisonResult>,
 }
 
 #[derive(Clone)]
@@ -81,6 +85,7 @@ pub enum JobRequest {
     Strip(StripMetadataRequest),
     Migrate(MigrateRequest),
     Verify(VerifyRequest),
+    Compare(CompareRequest),
 }
 
 impl JobRequest {
@@ -97,6 +102,7 @@ impl JobRequest {
             Self::Strip(_) => JobKind::Strip,
             Self::Migrate(_) => JobKind::Migrate,
             Self::Verify(_) => JobKind::Verify,
+            Self::Compare(_) => JobKind::Compare,
         }
     }
 
@@ -121,6 +127,7 @@ impl JobRequest {
             Self::Strip(request) => Some(request.output_path.clone()),
             Self::Migrate(request) => Some(request.output_path.clone()),
             Self::Verify(_) => None,
+            Self::Compare(_) => None,
         }
     }
 
@@ -170,6 +177,27 @@ impl JobRequest {
                     request.mode
                 )),
             ],
+            Self::Compare(request) => {
+                let source_access = |source: &crate::comparison::CompareSource| match source.kind {
+                    crate::comparison::CompareSourceKind::Archive => {
+                        ResourceAccess::Read(source.path.clone())
+                    }
+                    crate::comparison::CompareSourceKind::Folder => {
+                        ResourceAccess::ReadTree(source.path.clone())
+                    }
+                };
+                vec![
+                    source_access(&request.left),
+                    source_access(&request.right),
+                    ResourceAccess::Identity(format!(
+                        "compare:{:?}:{}:{:?}:{}",
+                        request.left.kind,
+                        request.left.path.to_string_lossy(),
+                        request.right.kind,
+                        request.right.path.to_string_lossy()
+                    )),
+                ]
+            }
         }
     }
 }
@@ -177,6 +205,7 @@ impl JobRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ResourceAccess {
     Read(PathBuf),
+    ReadTree(PathBuf),
     Write(PathBuf),
     WriteTree(PathBuf),
     Identity(String),
@@ -191,6 +220,12 @@ impl ResourceAccess {
             | (Self::Write(left), Self::Write(right)) => left == right,
             (Self::Read(path), Self::WriteTree(tree))
             | (Self::WriteTree(tree), Self::Read(path)) => path.starts_with(tree),
+            (Self::ReadTree(tree), Self::Write(path))
+            | (Self::Write(path), Self::ReadTree(tree)) => path.starts_with(tree),
+            (Self::ReadTree(left), Self::WriteTree(right))
+            | (Self::WriteTree(right), Self::ReadTree(left)) => {
+                left.starts_with(right) || right.starts_with(left)
+            }
             (Self::Write(path), Self::WriteTree(tree))
             | (Self::WriteTree(tree), Self::Write(path)) => {
                 path.starts_with(tree) || tree.starts_with(path)
@@ -206,6 +241,7 @@ impl ResourceAccess {
 enum JobExecutionOutcome {
     Operation(crate::operations::OperationOutcome),
     Verification(VerificationReport),
+    Comparison(ComparisonReport),
 }
 
 struct JobRecord {
@@ -221,6 +257,8 @@ struct JobManagerInner {
     next_id: AtomicU64,
     records: Mutex<BTreeMap<String, JobRecord>>,
     persistence_path: Option<PathBuf>,
+    comparison_reports: Mutex<HashMap<String, ComparisonReport>>,
+    comparison_directory: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -232,6 +270,10 @@ type JobWorker = Box<dyn FnOnce() + Send + 'static>;
 
 impl JobManager {
     pub fn persistent(path: PathBuf) -> Self {
+        let comparison_directory = path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("comparison-results");
         let snapshots = match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice::<Vec<JobSnapshot>>(&bytes)
                 .map_err(|error| {
@@ -273,6 +315,8 @@ impl JobManager {
                 next_id: AtomicU64::new(next_id),
                 records: Mutex::new(records),
                 persistence_path: Some(path),
+                comparison_reports: Mutex::new(HashMap::new()),
+                comparison_directory: Some(comparison_directory),
             }),
         }
     }
@@ -313,6 +357,7 @@ impl JobManager {
             retryable: true,
             warnings: Vec::new(),
             verification_report: None,
+            comparison_report: None,
         };
         let cancelled = Arc::new(AtomicBool::new(false));
         let snapshot = {
@@ -480,6 +525,7 @@ impl JobManager {
             record.snapshot.retryable = true;
             record.snapshot.warnings.clear();
             record.snapshot.verification_report = None;
+            record.snapshot.comparison_report = None;
             let snapshot = record.snapshot.clone();
             if let Some(path) = self.inner.persistence_path.as_ref() {
                 if let Err(error) = persist_job_records(path, &records) {
@@ -532,6 +578,7 @@ impl JobManager {
                     "an active job cannot be dismissed",
                 ));
             }
+            self.remove_comparison_report(id)?;
             records.remove(id);
             let remaining = records
                 .values()
@@ -577,6 +624,101 @@ impl JobManager {
         })
     }
 
+    pub fn comparison_page(
+        &self,
+        request: &crate::comparison::ComparisonPageRequest,
+    ) -> io::Result<crate::comparison::ComparisonPage> {
+        let report = self.comparison_report(&request.job_id)?;
+        Ok(crate::comparison::page_report(&report, request))
+    }
+
+    fn comparison_report(&self, id: &str) -> io::Result<ComparisonReport> {
+        {
+            let records = self.inner.records.lock().unwrap();
+            let record = records
+                .get(id)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "job not found"))?;
+            if record.snapshot.kind != JobKind::Compare
+                || record.snapshot.status != JobStatus::Succeeded
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "the job does not have a completed comparison result",
+                ));
+            }
+        }
+        if let Some(report) = self
+            .inner
+            .comparison_reports
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+        {
+            return Ok(report);
+        }
+        let path = self.comparison_report_path(id).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "the comparison result is not available",
+            )
+        })?;
+        let report = serde_json::from_slice::<ComparisonReport>(&fs::read(path)?)
+            .map_err(io::Error::other)?;
+        self.inner
+            .comparison_reports
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), report.clone());
+        Ok(report)
+    }
+
+    fn store_comparison_report(&self, id: &str, report: &ComparisonReport) -> io::Result<()> {
+        if let Some(path) = self.comparison_report_path(id) {
+            let parent = path.parent().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "comparison result store has no parent",
+                )
+            })?;
+            fs::create_dir_all(parent)?;
+            let bytes = serde_json::to_vec(report).map_err(io::Error::other)?;
+            let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+            use std::io::Write as _;
+            temporary.write_all(&bytes)?;
+            temporary.as_file().sync_all()?;
+            temporary
+                .persist(path)
+                .map_err(|error| error.error)
+                .map(|_| ())?;
+        }
+        self.inner
+            .comparison_reports
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), report.clone());
+        Ok(())
+    }
+
+    fn remove_comparison_report(&self, id: &str) -> io::Result<()> {
+        self.inner.comparison_reports.lock().unwrap().remove(id);
+        if let Some(path) = self.comparison_report_path(id) {
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    fn comparison_report_path(&self, id: &str) -> Option<PathBuf> {
+        self.inner
+            .comparison_directory
+            .as_ref()
+            .map(|directory| directory.join(format!("{id}.json")))
+    }
+
     fn run(
         &self,
         id: String,
@@ -598,6 +740,7 @@ impl JobManager {
                     | JobRequest::Strip(_)
                     | JobRequest::Migrate(_) => "reading".into(),
                     JobRequest::Verify(_) => "verifying".into(),
+                    JobRequest::Compare(_) => "comparing".into(),
                 };
             }
         });
@@ -618,6 +761,7 @@ impl JobManager {
                         | JobKind::Strip
                         | JobKind::Migrate => "writing".into(),
                         JobKind::Verify => "verifying".into(),
+                        JobKind::Compare => "comparing".into(),
                     };
                     snapshot.completed_units = completed;
                     snapshot.total_units = Some(total);
@@ -692,6 +836,18 @@ impl JobManager {
                 progress,
             )
             .map(JobExecutionOutcome::Verification),
+            JobRequest::Compare(request) => crate::comparison::compare_sources(
+                request,
+                || cancelled.load(Ordering::Acquire),
+                progress,
+            )
+            .map(JobExecutionOutcome::Comparison),
+        };
+        let result = match result {
+            Ok(JobExecutionOutcome::Comparison(report)) => self
+                .store_comparison_report(&id, &report)
+                .map(|()| JobExecutionOutcome::Comparison(report)),
+            result => result,
         };
         self.update(&id, &observer, |snapshot| match result {
             Ok(JobExecutionOutcome::Operation(outcome)) => {
@@ -717,6 +873,18 @@ impl JobManager {
                 snapshot.warnings.clear();
                 snapshot.verification_report = Some(report);
             }
+            Ok(JobExecutionOutcome::Comparison(report)) => {
+                snapshot.status = JobStatus::Succeeded;
+                snapshot.phase = "completed".into();
+                snapshot.retryable = false;
+                snapshot.completed_units = report.summary.total;
+                snapshot.total_units = Some(report.summary.total);
+                snapshot.output_path = None;
+                snapshot.error = None;
+                snapshot.error_code = None;
+                snapshot.warnings.clear();
+                snapshot.comparison_report = Some(ComparisonResult::from(&report));
+            }
             Err(error) if cancelled.load(Ordering::Acquire) => {
                 snapshot.status = JobStatus::Cancelled;
                 snapshot.phase = "cleaning_up".into();
@@ -732,11 +900,12 @@ impl JobManager {
                 snapshot.error_code = Some("INTERRUPTED".into());
             }
             Err(error) => {
+                let error_code = job_error_code(snapshot.kind, &error);
                 snapshot.status = JobStatus::Failed;
                 snapshot.phase = "failed".into();
-                snapshot.retryable = true;
+                snapshot.retryable = !matches!(error_code, "PASSWORD_REQUIRED" | "WRONG_PASSWORD");
                 snapshot.error = Some(error.to_string());
-                snapshot.error_code = Some(job_error_code(snapshot.kind, &error).into());
+                snapshot.error_code = Some(error_code.into());
             }
         });
     }
@@ -820,6 +989,8 @@ impl Default for JobManager {
                 next_id: AtomicU64::new(0),
                 records: Mutex::new(BTreeMap::new()),
                 persistence_path: None,
+                comparison_reports: Mutex::new(HashMap::new()),
+                comparison_directory: None,
             }),
         }
     }
@@ -887,6 +1058,18 @@ fn persist_job_records(
 }
 
 fn job_error_code(kind: JobKind, error: &io::Error) -> &'static str {
+    let detail = error.to_string().to_lowercase();
+    if kind == JobKind::Compare {
+        if detail.contains("source changed") {
+            return "SOURCE_CHANGED";
+        }
+        if error.kind() == io::ErrorKind::InvalidInput && detail.contains("password") {
+            return "PASSWORD_REQUIRED";
+        }
+        if error.kind() == io::ErrorKind::InvalidData && detail.contains("password") {
+            return "WRONG_PASSWORD";
+        }
+    }
     match (kind, error.kind()) {
         (
             JobKind::Create
@@ -1002,6 +1185,18 @@ mod tests {
                 archive_path: PathBuf::from("/archives/verify.pna"),
                 password: None,
                 mode: crate::verification::VerificationMode::Complete,
+            }),
+            JobRequest::Compare(crate::comparison::CompareRequest {
+                left: crate::comparison::CompareSource {
+                    kind: crate::comparison::CompareSourceKind::Archive,
+                    path: PathBuf::from("/archives/compare-a.pna"),
+                    password: None,
+                },
+                right: crate::comparison::CompareSource {
+                    kind: crate::comparison::CompareSourceKind::Folder,
+                    path: PathBuf::from("/folders/compare-b"),
+                    password: None,
+                },
             }),
         ]
     }
@@ -1126,6 +1321,88 @@ mod tests {
     }
 
     #[test]
+    fn completed_comparison_is_paged_persisted_and_removed_with_its_job() {
+        // BE-COMPARE-JOB-RESULT-LIFECYCLE, BE-COMPARE-SECRET-NOT-PERSISTED
+        use std::io::Write;
+
+        use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
+
+        let temp = tempdir().unwrap();
+        let left = temp.path().join("left.pna");
+        let right = temp.path().join("right.pna");
+        for (path, contents) in [(&left, b"left".as_slice()), (&right, b"right".as_slice())] {
+            let file = fs::File::create(path).unwrap();
+            let mut archive = Archive::write_header(file).unwrap();
+            let mut entry =
+                EntryBuilder::new_file(EntryName::from("file.txt"), WriteOptions::store()).unwrap();
+            entry.write_all(contents).unwrap();
+            archive.add_entry(entry.build().unwrap()).unwrap();
+            archive.finalize().unwrap();
+        }
+        let store_path = temp.path().join("jobs.json");
+        let manager = JobManager::persistent(store_path.clone());
+        let queued = manager
+            .start(
+                JobRequest::Compare(crate::comparison::CompareRequest {
+                    left: crate::comparison::CompareSource {
+                        kind: crate::comparison::CompareSourceKind::Archive,
+                        path: left,
+                        password: Some("left-secret".into()),
+                    },
+                    right: crate::comparison::CompareSource {
+                        kind: crate::comparison::CompareSourceKind::Archive,
+                        path: right,
+                        password: Some("right-secret".into()),
+                    },
+                }),
+                Arc::new(|_| {}),
+            )
+            .unwrap();
+        let completed = wait_for_terminal(&manager, &queued.id);
+        assert_eq!(completed.status, JobStatus::Succeeded);
+        assert_eq!(
+            completed
+                .comparison_report
+                .as_ref()
+                .unwrap()
+                .summary
+                .content_changed,
+            1
+        );
+        let page_request = crate::comparison::ComparisonPageRequest {
+            job_id: queued.id.clone(),
+            kinds: Vec::new(),
+            query: String::new(),
+            cursor: None,
+            limit: Some(50),
+        };
+        assert_eq!(
+            manager.comparison_page(&page_request).unwrap().items.len(),
+            1
+        );
+        drop(manager);
+
+        let stored = fs::read_to_string(&store_path).unwrap();
+        assert!(!stored.contains("left-secret"));
+        assert!(!stored.contains("right-secret"));
+        let restored = JobManager::persistent(store_path);
+        assert_eq!(
+            restored.comparison_page(&page_request).unwrap().items.len(),
+            1
+        );
+        restored.dismiss(&queued.id).unwrap();
+        assert_eq!(
+            restored.comparison_page(&page_request).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert!(!temp
+            .path()
+            .join("comparison-results")
+            .join(format!("{}.json", queued.id))
+            .exists());
+    }
+
+    #[test]
     fn every_completed_job_result_survives_restart_without_its_request() {
         // BE-JOB-PERSISTED-TERMINAL
         let temp = tempdir().unwrap();
@@ -1210,6 +1487,7 @@ mod tests {
             retryable: false,
             warnings: Vec::new(),
             verification_report: None,
+            comparison_report: None,
         })
         .unwrap();
         value["warnings"] = serde_json::json!(["legacy cleanup detail"]);
@@ -1315,7 +1593,7 @@ mod tests {
         // BE-JOB-CONFLICT-CREATE, BE-JOB-CONFLICT-EXTRACT, BE-JOB-CONFLICT-APPEND,
         // BE-JOB-CONFLICT-DELETE, BE-JOB-CONFLICT-RENAME, BE-JOB-CONFLICT-SPLIT,
         // BE-JOB-CONFLICT-CONCAT, BE-JOB-CONFLICT-SORT, BE-JOB-CONFLICT-STRIP,
-        // BE-JOB-CONFLICT-MIGRATE, BE-JOB-CONFLICT-VERIFY
+        // BE-JOB-CONFLICT-MIGRATE, BE-JOB-CONFLICT-VERIFY, BE-JOB-CONFLICT-COMPARE
         for request in sample_job_requests() {
             let manager = JobManager::default();
             let kind = request.kind();
@@ -1336,6 +1614,107 @@ mod tests {
             );
             assert_eq!(manager.list().len(), 1);
         }
+    }
+
+    #[test]
+    fn comparison_failures_use_actionable_structured_codes() {
+        // BE-COMPARE-JOB-ERROR-CODES
+        assert_eq!(
+            job_error_code(
+                JobKind::Compare,
+                &io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "password is required to decrypt solid entry",
+                ),
+            ),
+            "PASSWORD_REQUIRED"
+        );
+        assert_eq!(
+            job_error_code(
+                JobKind::Compare,
+                &io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "the archive password did not produce verifiable plaintext",
+                ),
+            ),
+            "WRONG_PASSWORD"
+        );
+        assert_eq!(
+            job_error_code(
+                JobKind::Compare,
+                &io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "a comparison source changed while it was being read",
+                ),
+            ),
+            "SOURCE_CHANGED"
+        );
+    }
+
+    #[test]
+    fn comparison_reads_block_source_writes_but_not_unrelated_jobs() {
+        // BE-COMPARE-CONFLICTS-SOURCE-WRITE
+        let archive = PathBuf::from("/archives/a.pna");
+        let folder = PathBuf::from("/sources/current");
+        let manager = JobManager::default();
+        manager
+            .start_with_spawner(
+                JobRequest::Compare(crate::comparison::CompareRequest {
+                    left: crate::comparison::CompareSource {
+                        kind: crate::comparison::CompareSourceKind::Archive,
+                        path: archive.clone(),
+                        password: None,
+                    },
+                    right: crate::comparison::CompareSource {
+                        kind: crate::comparison::CompareSourceKind::Folder,
+                        path: folder.clone(),
+                        password: None,
+                    },
+                }),
+                Arc::new(|_| {}),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+
+        let archive_write = manager
+            .start_with_spawner(
+                JobRequest::Append(AppendRequest {
+                    archive_path: archive,
+                    sources: vec![PathBuf::from("/sources/new.txt")],
+                    options: sample_create_options(),
+                }),
+                Arc::new(|_| {}),
+                |_, _| panic!("a source mutation must not start"),
+            )
+            .unwrap_err();
+        assert_eq!(archive_write.kind(), io::ErrorKind::AlreadyExists);
+
+        let folder_write = manager
+            .start_with_spawner(
+                JobRequest::Create(CreateRequest {
+                    sources: vec![PathBuf::from("/elsewhere/input.txt")],
+                    output_path: folder.join("new.pna"),
+                    overwrite: false,
+                    options: sample_create_options(),
+                }),
+                Arc::new(|_| {}),
+                |_, _| panic!("a write inside the compared tree must not start"),
+            )
+            .unwrap_err();
+        assert_eq!(folder_write.kind(), io::ErrorKind::AlreadyExists);
+
+        manager
+            .start_with_spawner(
+                JobRequest::Create(CreateRequest {
+                    sources: vec![PathBuf::from("/elsewhere/input.txt")],
+                    output_path: PathBuf::from("/unrelated/new.pna"),
+                    overwrite: false,
+                    options: sample_create_options(),
+                }),
+                Arc::new(|_| {}),
+                |_, _| Ok(()),
+            )
+            .unwrap();
     }
 
     #[test]

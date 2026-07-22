@@ -110,6 +110,71 @@ describe("background job drawer", () => {
     expect(announcer).toHaveTextContent("Archive creation: Completed");
   });
 
+  it("[UI-JOB-LARGE-HISTORY] keeps 500 mixed jobs searchable, grouped, and incrementally rendered", async () => {
+    const jobs = Array.from({ length: 500 }, (_, index) => {
+      const sequence = index + 1;
+      const status =
+        sequence % 10 === 0
+          ? "failed"
+          : sequence % 7 === 0
+            ? "running"
+            : "succeeded";
+      return {
+        ...completed,
+        id: `job-${sequence}`,
+        status,
+        phase: status === "running" ? "writing" : "completed",
+        outputPath: `/output/archive-${sequence}.pna`,
+        error: status === "failed" ? `failure-${sequence}` : undefined,
+      } satisfies JobSnapshot;
+    });
+    bridge.invoke.mockImplementation(async (command: string) =>
+      command === "job_list" ? jobs : completed,
+    );
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Job center" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Job center" });
+    expect(within(dialog).getByText("Showing 50 of 500")).toBeVisible();
+    expect(dialog.querySelectorAll("[data-job-id]")).toHaveLength(50);
+    expect(
+      within(dialog).getByRole("heading", { name: "Active" }),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByRole("heading", { name: "Needs attention" }),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByRole("heading", { name: "Finished" }),
+    ).toBeVisible();
+
+    await userEvent.type(
+      within(dialog).getByRole("searchbox", { name: "Search jobs" }),
+      "archive-321.pna",
+    );
+    expect(within(dialog).getByText("archive-321.pna")).toBeVisible();
+    expect(within(dialog).getByText("Showing 1 of 1")).toBeVisible();
+    expect(dialog.querySelectorAll("[data-job-id]")).toHaveLength(1);
+  });
+
+  it("[UI-JOB-IDLE-COMPACT] marks a finished-only bar for the compact desktop layout", async () => {
+    bridge.invoke.mockImplementation(async (command: string) =>
+      command === "job_list" ? [completed] : completed,
+    );
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+    expect(
+      await screen.findByRole("region", { name: "Background jobs" }),
+    ).toHaveAttribute("data-active", "false");
+  });
+
   it("[UI-REPORT-PERSISTENCE-FAILURE] explains that a completed result will not survive restart", async () => {
     bridge.invoke.mockImplementation(async (command: string) => {
       if (command === "job_list") {
@@ -324,6 +389,124 @@ describe("background job drawer", () => {
     );
   });
 
+  it("[UI-COMPARE-JOB-RESULT] keeps a completed comparison available without opening it automatically", async () => {
+    const onViewComparison = vi.fn();
+    const comparison: JobSnapshot = {
+      ...completed,
+      id: "job-compare-4",
+      kind: "compare",
+      outputPath: null,
+      comparisonReport: {
+        left: {
+          kind: "archive",
+          path: "/data/a.pna",
+          size: 100,
+          modifiedAt: 1,
+          sha256: "source-a",
+        },
+        right: {
+          kind: "folder",
+          path: "/data/current",
+          size: 120,
+          modifiedAt: 2,
+          sha256: "source-b",
+        },
+        completedAt: 3,
+        summary: {
+          total: 4,
+          same: 1,
+          added: 1,
+          removed: 0,
+          contentChanged: 2,
+          metadataChanged: 0,
+          comparisonUnavailable: 0,
+        },
+      },
+    };
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") return [comparison];
+      return comparison;
+    });
+
+    render(
+      <I18nProvider>
+        <JobDrawer onViewComparison={onViewComparison} />
+      </I18nProvider>,
+    );
+
+    const bar = await screen.findByRole("region", {
+      name: "Background jobs",
+    });
+    expect(within(bar).getByText("Comparison")).toBeVisible();
+    expect(onViewComparison).not.toHaveBeenCalled();
+    await userEvent.click(
+      within(bar).getByRole("button", {
+        name: "View comparison results",
+      }),
+    );
+    expect(onViewComparison).toHaveBeenCalledWith(
+      comparison.id,
+      comparison.comparisonReport,
+    );
+  });
+
+  it("[UI-COMPARE-RESULT-DISMISS-WARNING] distinguishes deleting comparison evidence from ordinary job history", async () => {
+    const comparison: JobSnapshot = {
+      ...completed,
+      id: "job-compare-5",
+      kind: "compare",
+      outputPath: null,
+      comparisonReport: {
+        left: {
+          kind: "archive",
+          path: "/data/a.pna",
+          size: 1,
+          modifiedAt: 1,
+          sha256: "a",
+        },
+        right: {
+          kind: "archive",
+          path: "/data/b.pna",
+          size: 1,
+          modifiedAt: 1,
+          sha256: "b",
+        },
+        completedAt: 3,
+        summary: {
+          total: 0,
+          same: 0,
+          added: 0,
+          removed: 0,
+          contentChanged: 0,
+          metadataChanged: 0,
+          comparisonUnavailable: 0,
+        },
+      },
+    };
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "job_list") return [comparison];
+      return comparison;
+    });
+
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Delete saved comparison result",
+      }),
+    );
+    expect(
+      screen.getByRole("alertdialog", {
+        name: "Delete comparison result?",
+      }),
+    ).toHaveTextContent(
+      "Delete this comparison result? It will no longer be available to view.",
+    );
+  });
+
   it("[UI-VERIFY-RESULT-DISMISS-WARNING] does not delete an unexported verification result without explicit confirmation", async () => {
     const verification = {
       ...completed,
@@ -503,7 +686,11 @@ describe("background job drawer", () => {
 
   it("[UI-UX-JOB-OPEN-TRANSITION] closes the job center after opening its result", async () => {
     // The destination view or password prompt must not remain hidden by the job center.
-    const onOpenArchive = vi.fn().mockResolvedValue(undefined);
+    const onOpenArchive = vi.fn().mockImplementation(async () => {
+      expect(
+        screen.queryByRole("dialog", { name: "Job center" }),
+      ).not.toBeInTheDocument();
+    });
     bridge.invoke.mockImplementation(async (command: string) => {
       if (command === "job_list") return [completed];
       return completed;

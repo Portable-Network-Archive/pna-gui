@@ -181,6 +181,22 @@ describe("job API concurrency", () => {
           mode: "complete",
         }),
     ],
+    [
+      "UI-JOB-SINGLE-FLIGHT-COMPARE",
+      () =>
+        jobApi.startCompare({
+          left: {
+            kind: "archive",
+            path: "/tmp/left.pna",
+            password: null,
+          },
+          right: {
+            kind: "folder",
+            path: "/tmp/right",
+            password: null,
+          },
+        }),
+    ],
     ["UI-JOB-SINGLE-FLIGHT-CANCEL", () => jobApi.cancel("job-1")],
     ["UI-JOB-SINGLE-FLIGHT-RETRY", () => jobApi.retry("job-1")],
     ["UI-JOB-SINGLE-FLIGHT-DISMISS", () => jobApi.dismiss("job-1")],

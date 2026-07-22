@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   CheckCircledIcon,
   CrossCircledIcon,
@@ -12,6 +13,7 @@ import {
 import { AlertDialog, Button, Dialog, Flex } from "@radix-ui/themes";
 import {
   jobApi,
+  type ComparisonResult,
   type JobSnapshot,
   type JobStatus,
   type VerificationReport,
@@ -21,6 +23,8 @@ import { createSingleFlightGate } from "../singleFlight";
 import styles from "./JobDrawer.module.css";
 
 const ACTIVE = new Set<JobStatus>(["queued", "running", "cancel_requested"]);
+const PAGE_SIZE = 50;
+type JobStateFilter = "all" | "active" | "attention" | "finished";
 interface PresentedActionError {
   summary: string;
   detail?: string;
@@ -45,10 +49,12 @@ export default function JobDrawer({
   onOpenArchive,
   onCreatedArchive,
   onViewVerification,
+  onViewComparison,
 }: {
   onOpenArchive?: (path: string) => void | Promise<void>;
   onCreatedArchive?: () => void | Promise<void>;
   onViewVerification?: (jobId: string, report: VerificationReport) => void;
+  onViewComparison?: (jobId: string, result: ComparisonResult) => void;
 }) {
   const { t } = useI18n();
   const [jobs, setJobs] = useState<JobSnapshot[]>([]);
@@ -57,11 +63,18 @@ export default function JobDrawer({
   const [listError, setListError] = useState<PresentedActionError>();
   const [listenError, setListenError] = useState<PresentedActionError>();
   const [announcement, setAnnouncement] = useState("");
+  const [jobSearch, setJobSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState<JobStateFilter>("all");
+  const [kindFilter, setKindFilter] = useState<JobSnapshot["kind"] | "all">(
+    "all",
+  );
+  const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
   const [pendingDismiss, setPendingDismiss] = useState<{
     ids: string[];
-    verificationOnly: boolean;
+    resultKind: "verification" | "comparison" | null;
   }>();
   const actionGate = useMemo(createSingleFlightGate, []);
+  const dismissFocusReturnRef = useRef<HTMLElement | null>(null);
 
   const syncErrorMessage = useCallback(
     (caught: unknown) => {
@@ -128,6 +141,54 @@ export default function JobDrawer({
       ),
     [jobs],
   );
+  const matchesAttention = useCallback(
+    (job: JobSnapshot) =>
+      job.status === "failed" ||
+      job.status === "interrupted" ||
+      Boolean(job.error) ||
+      Boolean(job.warnings?.length),
+    [],
+  );
+  const filtered = useMemo(() => {
+    const query = jobSearch.trim().toLocaleLowerCase();
+    return visible.filter((job) => {
+      if (kindFilter !== "all" && job.kind !== kindFilter) return false;
+      if (stateFilter === "active" && !ACTIVE.has(job.status)) return false;
+      if (stateFilter === "attention" && !matchesAttention(job)) return false;
+      if (stateFilter === "finished" && ACTIVE.has(job.status)) return false;
+      if (!query) return true;
+      return [
+        job.id,
+        jobKindText(job, t),
+        jobStatusText(job, t),
+        job.currentItem,
+        job.outputPath,
+        job.error,
+      ].some((value) => value?.toLocaleLowerCase().includes(query));
+    });
+  }, [jobSearch, kindFilter, matchesAttention, stateFilter, t, visible]);
+  const displayed = filtered.slice(0, visibleLimit);
+  const grouped = [
+    {
+      key: "active",
+      label: t("jobGroupActive"),
+      jobs: displayed.filter((job) => ACTIVE.has(job.status)),
+    },
+    {
+      key: "attention",
+      label: t("jobGroupAttention"),
+      jobs: displayed.filter(
+        (job) => !ACTIVE.has(job.status) && matchesAttention(job),
+      ),
+    },
+    {
+      key: "finished",
+      label: t("jobGroupFinished"),
+      jobs: displayed.filter(
+        (job) => !ACTIVE.has(job.status) && !matchesAttention(job),
+      ),
+    },
+  ].filter((group) => group.jobs.length > 0);
   const syncError = listError ?? listenError;
   const announcer = (
     <div
@@ -154,13 +215,22 @@ export default function JobDrawer({
     if (
       job &&
       (job.verificationReport ||
+        job.comparisonReport ||
         job.error ||
         job.retryable ||
         Boolean(job.warnings?.length))
     ) {
+      dismissFocusReturnRef.current =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
       setPendingDismiss({
         ids: [jobId],
-        verificationOnly: Boolean(job.verificationReport),
+        resultKind: job.verificationReport
+          ? "verification"
+          : job.comparisonReport
+            ? "comparison"
+            : null,
       });
       return;
     }
@@ -197,7 +267,7 @@ export default function JobDrawer({
   };
   const openArchive = async (path: string) => {
     setActionError(undefined);
-    setOpen(false);
+    flushSync(() => setOpen(false));
     try {
       await onOpenArchive?.(path);
     } catch (caught) {
@@ -205,8 +275,12 @@ export default function JobDrawer({
     }
   };
   const viewVerification = (jobId: string, report: VerificationReport) => {
-    setOpen(false);
+    flushSync(() => setOpen(false));
     onViewVerification?.(jobId, report);
+  };
+  const viewComparison = (jobId: string, result: ComparisonResult) => {
+    flushSync(() => setOpen(false));
+    onViewComparison?.(jobId, result);
   };
   const clearFinished = () =>
     actionGate.run("clear-finished", async () => {
@@ -215,15 +289,26 @@ export default function JobDrawer({
         finished.some(
           (job) =>
             job.verificationReport ||
+            job.comparisonReport ||
             job.error ||
             job.retryable ||
             Boolean(job.warnings?.length),
         )
       ) {
+        dismissFocusReturnRef.current =
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
         setPendingDismiss({
           ids: finished.map((job) => job.id),
-          verificationOnly:
-            finished.length === 1 && Boolean(finished[0].verificationReport),
+          resultKind:
+            finished.length !== 1
+              ? null
+              : finished[0].verificationReport
+                ? "verification"
+                : finished[0].comparisonReport
+                  ? "comparison"
+                  : null,
         });
         return;
       }
@@ -246,11 +331,16 @@ export default function JobDrawer({
           if (nextOpen) void refreshJobs();
         }}
       >
-        <section className={styles.bar} aria-label={t("backgroundJobs")}>
+        <section
+          className={styles.bar}
+          data-active={activeCount > 0}
+          aria-label={t("backgroundJobs")}
+        >
           <Dialog.Trigger>
             <button
               type="button"
               className={styles.summary}
+              data-testid="job-center-open"
               aria-label={t("jobCenter")}
             >
               <span className={styles.summaryIcon} aria-hidden="true">
@@ -282,6 +372,7 @@ export default function JobDrawer({
               onViewVerification={
                 onViewVerification ? viewVerification : undefined
               }
+              onViewComparison={onViewComparison ? viewComparison : undefined}
             />
           )}
           {syncError && !open && (
@@ -319,22 +410,110 @@ export default function JobDrawer({
               {t("clearFinishedJobs").replace("{count}", String(finishedCount))}
             </Button>
           </div>
-          <div className={styles.centerList}>
-            {visible.length === 0 && <p>{t("noActiveJobs")}</p>}
-            {visible.map((job) => (
-              <JobRow
-                key={job.id}
-                job={job}
-                onDismiss={dismiss}
-                onReveal={reveal}
-                onCancel={cancel}
-                onRetry={retry}
-                onOpenArchive={onOpenArchive ? openArchive : undefined}
-                onViewVerification={
-                  onViewVerification ? viewVerification : undefined
-                }
+          <div className={styles.centerFilters}>
+            <label>
+              <span>{t("jobSearch")}</span>
+              <input
+                type="search"
+                value={jobSearch}
+                placeholder={t("jobSearchPlaceholder")}
+                onChange={(event) => {
+                  setJobSearch(event.target.value);
+                  setVisibleLimit(PAGE_SIZE);
+                }}
               />
+            </label>
+            <label>
+              <span>{t("jobStateFilter")}</span>
+              <select
+                value={stateFilter}
+                onChange={(event) => {
+                  setStateFilter(event.target.value as JobStateFilter);
+                  setVisibleLimit(PAGE_SIZE);
+                }}
+              >
+                <option value="all">{t("jobFilterAll")}</option>
+                <option value="active">{t("jobFilterActive")}</option>
+                <option value="attention">{t("jobFilterAttention")}</option>
+                <option value="finished">{t("jobFilterFinished")}</option>
+              </select>
+            </label>
+            <label>
+              <span>{t("jobKindFilter")}</span>
+              <select
+                value={kindFilter}
+                onChange={(event) => {
+                  setKindFilter(
+                    event.target.value as JobSnapshot["kind"] | "all",
+                  );
+                  setVisibleLimit(PAGE_SIZE);
+                }}
+              >
+                <option value="all">{t("jobKindAll")}</option>
+                {(
+                  [
+                    "create",
+                    "extract",
+                    "append",
+                    "delete",
+                    "rename",
+                    "split",
+                    "concat",
+                    "sort",
+                    "strip",
+                    "migrate",
+                    "verify",
+                    "compare",
+                  ] as JobSnapshot["kind"][]
+                ).map((kind) => (
+                  <option key={kind} value={kind}>
+                    {jobKindText({ kind }, t)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className={styles.filteredCount} role="status">
+            {t("jobShowingCount")
+              .replace("{shown}", String(displayed.length))
+              .replace("{total}", String(filtered.length))}
+          </p>
+          <div className={styles.centerList}>
+            {filtered.length === 0 && <p>{t("noMatchingJobs")}</p>}
+            {grouped.map((group) => (
+              <section key={group.key} className={styles.jobGroup}>
+                <h3>{group.label}</h3>
+                {group.jobs.map((job) => (
+                  <JobRow
+                    key={job.id}
+                    job={job}
+                    onDismiss={dismiss}
+                    onReveal={reveal}
+                    onCancel={cancel}
+                    onRetry={retry}
+                    onOpenArchive={onOpenArchive ? openArchive : undefined}
+                    onViewVerification={
+                      onViewVerification ? viewVerification : undefined
+                    }
+                    onViewComparison={
+                      onViewComparison ? viewComparison : undefined
+                    }
+                  />
+                ))}
+              </section>
             ))}
+            {displayed.length < filtered.length && (
+              <Button
+                type="button"
+                variant="soft"
+                className={styles.showMore}
+                onClick={() =>
+                  setVisibleLimit((current) => current + PAGE_SIZE)
+                }
+              >
+                {t("showMoreJobs")}
+              </Button>
+            )}
           </div>
           {actionError && open && (
             <ActionError
@@ -366,16 +545,34 @@ export default function JobDrawer({
           if (!nextOpen) setPendingDismiss(undefined);
         }}
       >
-        <AlertDialog.Content maxWidth="480px">
+        <AlertDialog.Content
+          maxWidth="480px"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            requestAnimationFrame(() => {
+              const target = dismissFocusReturnRef.current;
+              if (target?.isConnected) target.focus();
+              else {
+                document
+                  .querySelector<HTMLElement>("[data-testid='job-center-open']")
+                  ?.focus();
+              }
+            });
+          }}
+        >
           <AlertDialog.Title>
-            {pendingDismiss?.verificationOnly
+            {pendingDismiss?.resultKind === "verification"
               ? t("dismissVerificationResultTitle")
-              : t("dismissJobResultTitle")}
+              : pendingDismiss?.resultKind === "comparison"
+                ? t("dismissComparisonResultTitle")
+                : t("dismissJobResultTitle")}
           </AlertDialog.Title>
           <AlertDialog.Description>
-            {pendingDismiss?.verificationOnly
+            {pendingDismiss?.resultKind === "verification"
               ? t("dismissVerificationReportWarning")
-              : t("dismissJobResultWarning")}
+              : pendingDismiss?.resultKind === "comparison"
+                ? t("dismissComparisonResultWarning")
+                : t("dismissJobResultWarning")}
           </AlertDialog.Description>
           <Flex gap="3" mt="5" justify="end">
             <AlertDialog.Cancel>
@@ -405,9 +602,11 @@ export default function JobDrawer({
                   });
                 }}
               >
-                {pendingDismiss?.verificationOnly
+                {pendingDismiss?.resultKind === "verification"
                   ? t("deleteVerificationResult")
-                  : t("removeJobResult")}
+                  : pendingDismiss?.resultKind === "comparison"
+                    ? t("deleteComparisonResult")
+                    : t("removeJobResult")}
               </Button>
             </AlertDialog.Action>
           </Flex>
@@ -426,6 +625,7 @@ function JobRow({
   onRetry,
   onOpenArchive,
   onViewVerification,
+  onViewComparison,
 }: {
   job: JobSnapshot;
   compact?: boolean;
@@ -435,6 +635,7 @@ function JobRow({
   onRetry: (jobId: string) => Promise<void>;
   onOpenArchive?: (path: string) => void | Promise<void>;
   onViewVerification?: (jobId: string, report: VerificationReport) => void;
+  onViewComparison?: (jobId: string, result: ComparisonResult) => void;
 }) {
   const { t } = useI18n();
   const canCancel = job.status === "queued" || job.status === "running";
@@ -442,6 +643,11 @@ function JobRow({
     job.retryable !== false &&
     ["failed", "cancelled", "interrupted"].includes(job.status);
   const canDismiss = !ACTIVE.has(job.status);
+  const dismissLabel = job.verificationReport
+    ? t("dismissVerificationResult")
+    : job.comparisonReport
+      ? t("dismissComparisonResult")
+      : t("dismissCompletedJob");
   const canOpenArchiveOutput = !["extract", "split", "verify"].includes(
     job.kind,
   );
@@ -452,6 +658,7 @@ function JobRow({
   const status = jobStatusText(job, t);
   const detail =
     job.verificationReport?.archivePath ??
+    job.comparisonReport?.left.path ??
     (ACTIVE.has(job.status)
       ? (job.currentItem ?? job.outputPath ?? status)
       : (job.outputPath ?? job.currentItem ?? status));
@@ -477,6 +684,7 @@ function JobRow({
   return (
     <article
       className={styles.job}
+      data-job-id={job.id}
       data-status={job.status}
       data-verification={job.verificationReport?.conclusion}
     >
@@ -499,6 +707,7 @@ function JobRow({
                 strip: t("stripJob"),
                 migrate: t("migrateJob"),
                 verify: t("verificationJob"),
+                compare: t("comparisonJob"),
               }[job.kind]
             }
           </strong>
@@ -634,6 +843,7 @@ function JobRow({
               size="1"
               variant="soft"
               data-testid="open-created-archive"
+              data-job-action="open-output"
               onClick={() => void onOpenArchive(job.outputPath!)}
             >
               {job.kind === "create"
@@ -655,16 +865,26 @@ function JobRow({
               {t("viewVerificationResults")}
             </Button>
           )}
+        {job.status === "succeeded" &&
+          job.comparisonReport &&
+          onViewComparison && (
+            <Button
+              type="button"
+              size="1"
+              variant="soft"
+              data-job-action="view-comparison"
+              onClick={() => onViewComparison(job.id, job.comparisonReport!)}
+            >
+              {t("viewComparisonResults")}
+            </Button>
+          )}
         {canDismiss && (
           <button
             type="button"
             className={styles.dismissButton}
             data-testid={`dismiss-job-${job.id}`}
-            aria-label={
-              job.verificationReport
-                ? t("dismissVerificationResult")
-                : t("dismissCompletedJob")
-            }
+            aria-label={dismissLabel}
+            title={dismissLabel}
             onClick={() => void onDismiss(job.id)}
           >
             <Cross2Icon aria-hidden="true" />
@@ -676,7 +896,7 @@ function JobRow({
 }
 
 function jobKindText(
-  job: JobSnapshot,
+  job: Pick<JobSnapshot, "kind">,
   t: (key: TranslationKey) => string,
 ): string {
   const key: Record<JobSnapshot["kind"], TranslationKey> = {
@@ -691,6 +911,7 @@ function jobKindText(
     strip: "stripJob",
     migrate: "migrateJob",
     verify: "verificationJob",
+    compare: "comparisonJob",
   };
   return t(key[job.kind]);
 }
@@ -733,6 +954,9 @@ function presentJobError(
     PERMISSION_DENIED: "jobPermissionDenied",
     INVALID_INPUT: "jobInvalidInput",
     INVALID_DATA: "jobInvalidData",
+    PASSWORD_REQUIRED: "errorPasswordRequired",
+    WRONG_PASSWORD: "errorWrongPassword",
+    SOURCE_CHANGED: "jobComparisonSourceChanged",
     WORKER_PANIC: "jobWorkerFailed",
     WORKER_SPAWN_FAILED: "jobWorkerFailed",
     OPERATION_FAILED: "jobOperationFailed",
@@ -744,7 +968,13 @@ function presentJobError(
     action:
       job.errorCode === "CANCELLED" || job.errorCode === "APP_RESTARTED"
         ? undefined
-        : t("jobOperationFailedAction"),
+        : job.errorCode === "PASSWORD_REQUIRED"
+          ? t("actionEnterPassword")
+          : job.errorCode === "WRONG_PASSWORD"
+            ? t("actionCheckPassword")
+            : job.errorCode === "SOURCE_CHANGED"
+              ? t("jobComparisonSourceChangedAction")
+              : t("jobOperationFailedAction"),
   };
 }
 
