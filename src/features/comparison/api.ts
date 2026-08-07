@@ -10,7 +10,9 @@ export interface ComparisonItem {
   permission?: string | null;
   owner?: string | null;
   group?: string | null;
-  xattrs: string[];
+  // Null when the source cannot observe extended attributes (folder scanning),
+  // distinct from an empty array meaning "observed, none present".
+  xattrs?: string[] | null;
   compression?: string | null;
   encryption?: string | null;
   contentSha256?: string | null;
