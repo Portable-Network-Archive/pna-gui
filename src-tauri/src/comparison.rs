@@ -474,7 +474,9 @@ where
     let before = archive_stamp(source)?;
     let mut archive = Archive::read_header(fs::File::open(&source.path)?)?;
     let mut items = BTreeMap::new();
-    for entry in archive.entries_with_password(source.password.as_deref().map(str::as_bytes)) {
+    for entry in archive.entries_with_options(&ReadOptions::with_password(
+        source.password.as_deref().map(str::as_bytes),
+    )) {
         check_cancelled(cancelled)?;
         let entry = entry?;
         let path = entry.header().path().as_str().replace('\\', "/");
@@ -827,8 +829,9 @@ fn data_kind_name(kind: DataKind) -> &'static str {
         DataKind::Directory => "directory",
         DataKind::SymbolicLink => "symbolic_link",
         DataKind::HardLink => "hard_link",
-        DataKind::Reserved(_) => "reserved",
-        DataKind::Private(_) => "private",
+        kind if kind.is_reserved() => "reserved",
+        kind if kind.is_private() => "private",
+        _ => "unknown",
     }
 }
 
