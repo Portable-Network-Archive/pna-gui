@@ -419,15 +419,17 @@ where
     on_change_archive(Event::Start, &out_dir);
     let file = fs::File::open(path)?;
     let mut archive = libpna::Archive::read_header(file)?;
-    for entry in archive.entries_with_password(password.map(str::as_bytes)) {
+    for entry in archive.entries_with_options(&libpna::ReadOptions::with_password(
+        password.map(str::as_bytes),
+    )) {
         let entry = entry?;
         let name = entry.header().path().as_path();
         let relative = safe_relative_entry_path(name)?;
         match entry.header().data_kind() {
-            libpna::DataKind::Directory => {
+            libpna::DataKind::DIRECTORY => {
                 create_safe_directory(&out_dir, &canonical_root, &relative)?;
             }
-            libpna::DataKind::File => {
+            libpna::DataKind::FILE => {
                 on_change_entry(Event::Start, name);
                 let out_path = prepare_safe_file_path(&out_dir, &canonical_root, &relative)?;
                 let mut writer = OpenOptions::new()
@@ -439,13 +441,19 @@ where
                 io::copy(&mut reader, &mut writer)?;
                 on_change_entry(Event::Finish, name);
             }
-            libpna::DataKind::SymbolicLink | libpna::DataKind::HardLink => {
+            libpna::DataKind::SYMBOLIC_LINK | libpna::DataKind::HARD_LINK => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "archive links are not extracted",
                 ));
             }
-            libpna::DataKind::Reserved(_) | libpna::DataKind::Private(_) => {
+            kind if kind.is_reserved() || kind.is_private() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unsupported archive entry kind",
+                ));
+            }
+            _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "unsupported archive entry kind",
@@ -1037,7 +1045,9 @@ mod tests {
 
             let file = fs::File::open(temp.path().join(&name)).unwrap();
             let mut archive = Archive::read_header(file).unwrap();
-            let mut entries = archive.entries_with_password(password.as_deref().map(str::as_bytes));
+            let mut entries = archive.entries_with_options(&libpna::ReadOptions::with_password(
+                password.as_deref().map(str::as_bytes),
+            ));
             let entry = entries.next().unwrap().unwrap();
             let mut content = String::new();
             entry

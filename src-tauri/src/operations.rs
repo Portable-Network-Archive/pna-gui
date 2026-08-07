@@ -205,7 +205,9 @@ where
     let password = request.password.as_deref();
 
     let result = (|| -> io::Result<()> {
-        for entry in archive.entries_with_password(password.map(str::as_bytes)) {
+        for entry in archive.entries_with_options(&libpna::ReadOptions::with_password(
+            password.map(str::as_bytes),
+        )) {
             check_cancelled(&cancelled)?;
             let entry = entry?;
             let name = entry.header().path().as_path();
@@ -285,7 +287,13 @@ where
                         "archive links are not extracted",
                     ));
                 }
-                libpna::DataKind::Reserved(_) | libpna::DataKind::Private(_) => {
+                kind if kind.is_reserved() || kind.is_private() => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unsupported archive entry kind",
+                    ));
+                }
+                _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "unsupported archive entry kind",
@@ -325,7 +333,9 @@ fn preflight_extract(request: &ExtractRequest) -> io::Result<(u64, u128)> {
     let password = request.password.as_deref();
     let mut files = 0_u64;
     let mut required_bytes = 0_u128;
-    for entry in archive.entries_with_password(password.map(str::as_bytes)) {
+    for entry in archive.entries_with_options(&libpna::ReadOptions::with_password(
+        password.map(str::as_bytes),
+    )) {
         let entry = entry?;
         let relative = super::safe_relative_entry_path(entry.header().path().as_path())?;
         if !is_selected(&relative, &request.entries) {
@@ -344,7 +354,13 @@ fn preflight_extract(request: &ExtractRequest) -> io::Result<(u64, u128)> {
                     "archive links are not extracted",
                 ));
             }
-            libpna::DataKind::Reserved(_) | libpna::DataKind::Private(_) => {
+            kind if kind.is_reserved() || kind.is_private() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unsupported archive entry kind",
+                ));
+            }
+            _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "unsupported archive entry kind",
@@ -568,9 +584,9 @@ where
     let mut existing_names = HashSet::new();
     let file = fs::File::open(&request.archive_path)?;
     let mut archive = Archive::read_header(file)?;
-    for entry in
-        archive.entries_with_password(request.options.password.as_deref().map(str::as_bytes))
-    {
+    for entry in archive.entries_with_options(&libpna::ReadOptions::with_password(
+        request.options.password.as_deref().map(str::as_bytes),
+    )) {
         check_cancelled(&cancelled)?;
         existing_names.insert(entry?.name().as_path().to_path_buf());
     }
@@ -779,7 +795,9 @@ where
         match read_entry {
             ReadEntry::Normal(_) => Ok(total + 1),
             ReadEntry::Solid(solid) => solid
-                .entries(password.map(str::as_bytes))?
+                .entries(libpna::ReadOptions::with_password(
+                    password.map(str::as_bytes),
+                ))?
                 .try_fold(total, |count, entry| entry.map(|_| count + 1)),
         }
     })?;
@@ -831,7 +849,9 @@ where
                     builder.add_extra_chunk(chunk.clone());
                 }
                 let mut retained = 0_u64;
-                for item in solid.entries(password.map(str::as_bytes))? {
+                for item in solid.entries(libpna::ReadOptions::with_password(
+                    password.map(str::as_bytes),
+                ))? {
                     check_cancelled(&cancelled)?;
                     let entry = item?;
                     let original_name = entry.name().to_string();
@@ -1317,7 +1337,9 @@ where
                 }
                 logical.extend(
                     solid
-                        .entries(request.password.as_deref().map(str::as_bytes))?
+                        .entries(libpna::ReadOptions::with_password(
+                            request.password.as_deref().map(str::as_bytes),
+                        ))?
                         .collect::<io::Result<Vec<_>>>()?,
                 );
             }
@@ -1461,7 +1483,9 @@ where
         match read_entry {
             ReadEntry::Normal(_) => Ok(total + 1),
             ReadEntry::Solid(solid) => solid
-                .entries(password.map(str::as_bytes))?
+                .entries(libpna::ReadOptions::with_password(
+                    password.map(str::as_bytes),
+                ))?
                 .try_fold(total, |count, entry| entry.map(|_| count + 1)),
         }
     })?;
@@ -1493,7 +1517,9 @@ where
                 for chunk in solid.extra_chunks() {
                     builder.add_extra_chunk(chunk.clone());
                 }
-                for entry in solid.entries(password.map(str::as_bytes))? {
+                for entry in solid.entries(libpna::ReadOptions::with_password(
+                    password.map(str::as_bytes),
+                ))? {
                     check_cancelled(&cancelled)?;
                     let entry = transform(entry?)?;
                     completed += 1;
@@ -1900,7 +1926,7 @@ mod tests {
         let file = fs::File::open(&archive_path).unwrap();
         let mut archive = Archive::read_header(file).unwrap();
         let mut contents = archive
-            .entries_with_password(None)
+            .entries_with_options(&libpna::ReadOptions::with_password(None::<&[u8]>))
             .map(|entry| {
                 let entry = entry.unwrap();
                 let name = entry.name().to_string();
@@ -2545,7 +2571,7 @@ mod tests {
         let file = fs::File::open(path).unwrap();
         let mut archive = Archive::read_header(file).unwrap();
         archive
-            .entries_with_password(None)
+            .entries_with_options(&libpna::ReadOptions::with_password(None::<&[u8]>))
             .map(|entry| entry.unwrap().name().to_string())
             .collect()
     }
@@ -2873,7 +2899,9 @@ mod tests {
         let file = fs::File::open(path)?;
         let mut archive = Archive::read_header(file)?;
         archive
-            .entries_with_password(password.map(str::as_bytes))
+            .entries_with_options(&libpna::ReadOptions::with_password(
+                password.map(str::as_bytes),
+            ))
             .map(|entry| entry.map(|entry| entry.name().to_string()))
             .collect()
     }
@@ -2882,7 +2910,9 @@ mod tests {
         let file = fs::File::open(path).unwrap();
         let mut archive = Archive::read_header(file).unwrap();
         let mut names = archive
-            .entries_with_password(password.map(str::as_bytes))
+            .entries_with_options(&libpna::ReadOptions::with_password(
+                password.map(str::as_bytes),
+            ))
             .map(|entry| entry.unwrap().name().to_string())
             .collect::<Vec<_>>();
         names.sort();
@@ -3379,8 +3409,9 @@ mod tests {
                     .unwrap();
                     let mut archive =
                         Archive::read_header(fs::File::open(output).unwrap()).unwrap();
-                    let mut entries =
-                        archive.entries_with_password(password.as_deref().map(str::as_bytes));
+                    let mut entries = archive.entries_with_options(
+                        &libpna::ReadOptions::with_password(password.as_deref().map(str::as_bytes)),
+                    );
                     let entry = entries.next().unwrap().unwrap();
                     let mut content = Vec::new();
                     entry
@@ -3418,7 +3449,7 @@ mod tests {
         .unwrap();
         let mut archive = Archive::read_header(fs::File::open(output).unwrap()).unwrap();
         let names = archive
-            .entries_with_password(None)
+            .entries_with_options(&libpna::ReadOptions::with_password(None::<&[u8]>))
             .map(|entry| entry.unwrap().header().path().as_path().to_path_buf())
             .collect::<Vec<_>>();
         assert!(names.contains(&PathBuf::from("single.txt")));

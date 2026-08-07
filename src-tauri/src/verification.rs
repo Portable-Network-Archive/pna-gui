@@ -410,7 +410,9 @@ where
     // archive payload is never held in memory at once.
     let mut archive = Archive::read_header(fs::File::open(&request.archive_path)?)?;
     let mut total = 0_u64;
-    for entry in archive.entries_with_password(password.map(str::as_bytes)) {
+    for entry in
+        archive.entries_with_options(&ReadOptions::with_password(password.map(str::as_bytes)))
+    {
         check_cancelled(&cancelled)?;
         if entry.is_err() {
             break;
@@ -431,7 +433,9 @@ where
         passed_check(VerificationCheckCode::EntryStructure),
     ];
 
-    for entry in archive.entries_with_password(password.map(str::as_bytes)) {
+    for entry in
+        archive.entries_with_options(&ReadOptions::with_password(password.map(str::as_bytes)))
+    {
         check_cancelled(&cancelled)?;
         let entry = match entry {
             Ok(entry) => entry,
@@ -589,7 +593,14 @@ where
                 Some(path.clone()),
                 "Archive links are never restored by this application.",
             ),
-            DataKind::Reserved(_) | DataKind::Private(_) => record_content_not_checked(
+            kind if kind.is_reserved() || kind.is_private() => record_content_not_checked(
+                &mut checks,
+                &mut content_not_checked,
+                VerificationCheckCode::UnsupportedEntry,
+                Some(path.clone()),
+                "This entry kind is not restored by this application.",
+            ),
+            _ => record_content_not_checked(
                 &mut checks,
                 &mut content_not_checked,
                 VerificationCheckCode::UnsupportedEntry,

@@ -11,11 +11,8 @@ pub(crate) fn is_encrypted<P: AsRef<Path>>(path: P) -> io::Result<bool> {
             ReadEntry::Solid(entry) => entry.encryption(),
         };
         match encryption {
-            Encryption::No => (),
-            Encryption::Aes
-            | Encryption::Camellia
-            | Encryption::Reserved(_)
-            | Encryption::Private(_) => return Ok(true),
+            Encryption::NO => (),
+            _ => return Ok(true),
         }
     }
     Ok(false)

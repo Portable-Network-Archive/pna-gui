@@ -461,7 +461,9 @@ fn build_index(
     let mut compression_methods = outer_compression;
     let mut encryption_methods = outer_encryption;
 
-    for entry in archive.entries_with_password(password.map(str::as_bytes)) {
+    for entry in
+        archive.entries_with_options(&ReadOptions::with_password(password.map(str::as_bytes)))
+    {
         let entry =
             entry.map_err(|error| map_archive_error(error, encrypted && password.is_some()))?;
         actual_entry_count += 1;
@@ -656,7 +658,9 @@ fn preview_entry(
     let file = fs::File::open(&session.path).map_err(map_open_error)?;
     let mut archive =
         Archive::read_header(file).map_err(|error| map_archive_error(error, false))?;
-    for entry in archive.entries_with_password(session.password.as_deref().map(str::as_bytes)) {
+    for entry in archive.entries_with_options(&ReadOptions::with_password(
+        session.password.as_deref().map(str::as_bytes),
+    )) {
         let entry = entry.map_err(|error| map_archive_error(error, session.password.is_some()))?;
         if entry.header().path().as_str() != indexed.dto.path {
             continue;
@@ -862,26 +866,29 @@ fn compression_name(value: Compression) -> &'static str {
         Compression::Deflate => "Deflate",
         Compression::ZStandard => "Zstandard",
         Compression::XZ => "XZ",
-        Compression::Reserved(_) | Compression::Private(_) => "Unknown",
+        value if value.is_reserved() || value.is_private() => "Unknown",
+        _ => "Unknown",
     }
 }
 
 fn encryption_name(value: Encryption) -> &'static str {
     match value {
-        Encryption::No => "None",
-        Encryption::Aes => "AES",
-        Encryption::Camellia => "Camellia",
-        Encryption::Reserved(_) | Encryption::Private(_) => "Unknown",
+        Encryption::NO => "None",
+        Encryption::AES => "AES",
+        Encryption::CAMELLIA => "Camellia",
+        value if value.is_reserved() || value.is_private() => "Unknown",
+        _ => "Unknown",
     }
 }
 
 fn kind_name(value: DataKind) -> &'static str {
     match value {
-        DataKind::File => "file",
-        DataKind::Directory => "directory",
-        DataKind::SymbolicLink => "symlink",
-        DataKind::HardLink => "hardlink",
-        DataKind::Reserved(_) | DataKind::Private(_) => "unknown",
+        DataKind::FILE => "file",
+        DataKind::DIRECTORY => "directory",
+        DataKind::SYMBOLIC_LINK => "symlink",
+        DataKind::HARD_LINK => "hardlink",
+        value if value.is_reserved() || value.is_private() => "unknown",
+        _ => "unknown",
     }
 }
 
@@ -1404,23 +1411,29 @@ mod tests {
         // BE-COMPRESSION-ZSTD, BE-COMPRESSION-XZ,
         // BE-ENCRYPTION-NONE, BE-ENCRYPTION-AES, BE-ENCRYPTION-CAMELLIA,
         // BE-TEXT-PREVIEW-SUPPORTED, BE-TEXT-PREVIEW-UNSUPPORTED
-        assert_eq!(kind_name(DataKind::File), "file");
-        assert_eq!(kind_name(DataKind::Directory), "directory");
-        assert_eq!(kind_name(DataKind::SymbolicLink), "symlink");
-        assert_eq!(kind_name(DataKind::HardLink), "hardlink");
-        assert_eq!(compression_name(Compression::No), "Store");
+        assert_eq!(kind_name(DataKind::FILE), "file");
+        assert_eq!(kind_name(DataKind::DIRECTORY), "directory");
+        assert_eq!(kind_name(DataKind::SYMBOLIC_LINK), "symlink");
+        assert_eq!(kind_name(DataKind::HARD_LINK), "hardlink");
+        assert_eq!(compression_name(Compression::NO), "Store");
         assert_eq!(compression_name(Compression::Deflate), "Deflate");
         assert_eq!(compression_name(Compression::ZStandard), "Zstandard");
         assert_eq!(compression_name(Compression::XZ), "XZ");
-        assert_eq!(encryption_name(Encryption::No), "None");
-        assert_eq!(encryption_name(Encryption::Aes), "AES");
-        assert_eq!(encryption_name(Encryption::Camellia), "Camellia");
-        assert_eq!(kind_name(DataKind::Reserved(4)), "unknown");
-        assert_eq!(kind_name(DataKind::Private(128)), "unknown");
-        assert_eq!(compression_name(Compression::Reserved(3)), "Unknown");
-        assert_eq!(compression_name(Compression::Private(128)), "Unknown");
-        assert_eq!(encryption_name(Encryption::Reserved(3)), "Unknown");
-        assert_eq!(encryption_name(Encryption::Private(128)), "Unknown");
+        assert_eq!(encryption_name(Encryption::NO), "None");
+        assert_eq!(encryption_name(Encryption::AES), "AES");
+        assert_eq!(encryption_name(Encryption::CAMELLIA), "Camellia");
+        assert_eq!(kind_name(DataKind::from_byte(4)), "unknown");
+        assert_eq!(kind_name(DataKind::new_private(128).unwrap()), "unknown");
+        assert_eq!(compression_name(Compression::from_byte(3)), "Unknown");
+        assert_eq!(
+            compression_name(Compression::new_private(128).unwrap()),
+            "Unknown"
+        );
+        assert_eq!(encryption_name(Encryption::from_byte(3)), "Unknown");
+        assert_eq!(
+            encryption_name(Encryption::new_private(128).unwrap()),
+            "Unknown"
+        );
         assert!(is_text_preview("README.MD"));
         assert!(!is_text_preview("photo.png"));
     }
