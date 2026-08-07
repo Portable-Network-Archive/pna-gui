@@ -2343,15 +2343,16 @@ mod tests {
         let mut builder = EntryBuilder::new_file("meta.txt".into(), WriteOptions::store()).unwrap();
         builder
             .created(Duration::seconds(123))
-            .permission_mode(PermissionMode::from(0o640))
-            .add_xattr(ExtendedAttribute::new(
-                XattrName::try_from("user.pna-test").unwrap(),
-                XattrValue::try_from(b"retained".as_slice()).unwrap(),
-            ))
-            .add_extra_chunk(RawChunk::from_data(
-                ChunkType::private(*b"ptSt").unwrap(),
-                b"private metadata".to_vec(),
-            ));
+            .permission_mode(PermissionMode::from(0o640));
+        #[cfg(not(windows))]
+        builder.add_xattr(ExtendedAttribute::new(
+            XattrName::try_from("user.pna-test").unwrap(),
+            XattrValue::try_from(b"retained".as_slice()).unwrap(),
+        ));
+        builder.add_extra_chunk(RawChunk::from_data(
+            ChunkType::private(*b"ptSt").unwrap(),
+            b"private metadata".to_vec(),
+        ));
         builder.write_all(b"content").unwrap();
         archive.add_entry(builder.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -2399,6 +2400,7 @@ mod tests {
             retained.metadata().permission_mode(),
             Some(PermissionMode::from(0o640))
         );
+        #[cfg(not(windows))]
         assert_eq!(retained.xattrs().len(), 1);
         assert!(retained
             .extra_chunks()
