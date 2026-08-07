@@ -61,6 +61,9 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
+    "mocha": {
+      "serialize-javascript": "7.0.5"
+    },
     "@wdio/tauri-service": {
       "@wdio/native-utils": "2.5.0"
     }
