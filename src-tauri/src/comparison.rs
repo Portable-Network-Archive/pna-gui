@@ -404,7 +404,7 @@ fn folder_content_digest(items: &BTreeMap<String, ComparisonItem>) -> String {
             digest.update(hash.as_bytes());
         }
     }
-    format!("{:x}", digest.finalize())
+    hex_bytes(digest.finalize())
 }
 
 fn sha256_file_with_cancel(path: &PathBuf, cancelled: &impl Fn() -> bool) -> io::Result<String> {
@@ -419,7 +419,15 @@ fn sha256_file_with_cancel(path: &PathBuf, cancelled: &impl Fn() -> bool) -> io:
         }
         digest.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(hex_bytes(digest.finalize()))
+}
+
+fn hex_bytes(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[cfg(unix)]
@@ -525,7 +533,7 @@ where
                     ));
                 }
             }
-            Some(format!("{digest:x}"))
+            Some(hex_bytes(digest))
         } else {
             None
         };
@@ -547,9 +555,9 @@ where
                 .iter()
                 .map(|attribute| {
                     format!(
-                        "{}:{:x}",
+                        "{}:{}",
                         attribute.name(),
-                        Sha256::digest(attribute.value())
+                        hex_bytes(Sha256::digest(attribute.value()))
                     )
                 })
                 .collect(),
@@ -619,7 +627,14 @@ fn archive_stamp(source: &CompareSource) -> io::Result<ComparisonSourceStamp> {
     }
     let mut file = fs::File::open(&source.path)?;
     let mut digest = Sha256::new();
-    io::copy(&mut file, &mut digest)?;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
     Ok(ComparisonSourceStamp {
         kind: CompareSourceKind::Archive,
         path: source.path.clone(),
@@ -628,7 +643,7 @@ fn archive_stamp(source: &CompareSource) -> io::Result<ComparisonSourceStamp> {
             .modified()
             .ok()
             .and_then(system_time_to_unix_seconds),
-        sha256: format!("{:x}", digest.finalize()),
+        sha256: hex_bytes(digest.finalize()),
     })
 }
 
@@ -870,7 +885,7 @@ mod tests {
     }
 
     fn file_sha256(path: &Path) -> String {
-        format!("{:x}", Sha256::digest(fs::read(path).unwrap()))
+        hex_bytes(Sha256::digest(fs::read(path).unwrap()))
     }
 
     fn generated_test_password() -> String {
@@ -1082,7 +1097,7 @@ mod tests {
                 xattrs: Vec::new(),
                 compression: Some("No".into()),
                 encryption: Some("No".into()),
-                content_sha256: Some(format!("{:x}", Sha256::digest(b"content"))),
+                content_sha256: Some(hex_bytes(Sha256::digest(b"content"))),
             },
         )]);
         let first = folder_content_digest(&before);
