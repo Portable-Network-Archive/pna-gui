@@ -55,8 +55,11 @@ pub struct ComparisonItem {
     pub permission: Option<String>,
     pub owner: Option<String>,
     pub group: Option<String>,
+    /// `None` means the source cannot observe extended attributes (folder
+    /// scanning), as opposed to `Some(vec![])` meaning "observed, none present".
+    /// Only two observed sides are ever compared.
     #[serde(default)]
-    pub xattrs: Vec<String>,
+    pub xattrs: Option<Vec<String>>,
     pub compression: Option<String>,
     pub encryption: Option<String>,
     pub content_sha256: Option<String>,
@@ -334,7 +337,9 @@ where
                     permission: permission_string(&metadata),
                     owner: owner_string(&metadata),
                     group: group_string(&metadata),
-                    xattrs: Vec::new(),
+                    // Folder scanning has no dependency-free way to read
+                    // extended attributes, so they are unobserved here.
+                    xattrs: None,
                     compression: Some("No".into()),
                     encryption: Some("No".into()),
                     content_sha256,
@@ -381,9 +386,10 @@ fn folder_content_digest(items: &BTreeMap<String, ComparisonItem>) -> String {
         } else {
             digest.update([0]);
         }
-        // Reading a file for hashing may update its access time. Access time is
-        // still reported as comparable metadata, but it must not participate in
-        // the mutation guard or an unchanged folder can invalidate its own scan.
+        // Access time is deliberately absent here: reading a file to hash it can
+        // perturb atime, so including it would let an unchanged folder invalidate
+        // its own scan. It is excluded from the reported differences for the same
+        // reason (see `metadata_differences`).
         for value in [
             item.created_at.map(|value| value.to_string()),
             item.owner.clone(),
@@ -396,7 +402,7 @@ fn folder_content_digest(items: &BTreeMap<String, ComparisonItem>) -> String {
                 digest.update([0]);
             }
         }
-        for xattr in &item.xattrs {
+        for xattr in item.xattrs.iter().flatten() {
             digest.update(xattr.as_bytes());
             digest.update([0]);
         }
@@ -450,16 +456,12 @@ fn group_string(_: &fs::Metadata) -> Option<String> {
     None
 }
 
+// Non-unix folders cannot express a permission mode. Archive entries store an
+// octal mode, so emitting a readonly/writable string here would always differ
+// from the archive side; report the mode as unobserved instead.
 #[cfg(not(unix))]
-fn permission_string(metadata: &fs::Metadata) -> Option<String> {
-    Some(
-        if metadata.permissions().readonly() {
-            "readonly"
-        } else {
-            "writable"
-        }
-        .into(),
-    )
+fn permission_string(_: &fs::Metadata) -> Option<String> {
+    None
 }
 
 fn read_archive<C>(
@@ -542,17 +544,19 @@ where
                 .map(|value| format!("{:04o}", value.get())),
             owner: archive_owner(metadata),
             group: archive_group(metadata),
-            xattrs: entry
-                .xattrs()
-                .iter()
-                .map(|attribute| {
-                    format!(
-                        "{}:{:x}",
-                        attribute.name(),
-                        Sha256::digest(attribute.value())
-                    )
-                })
-                .collect(),
+            xattrs: Some(
+                entry
+                    .xattrs()
+                    .iter()
+                    .map(|attribute| {
+                        format!(
+                            "{}:{:x}",
+                            attribute.name(),
+                            Sha256::digest(attribute.value())
+                        )
+                    })
+                    .collect(),
+            ),
             compression: Some(format!("{:?}", entry.header().compression())),
             encryption: Some(format!("{:?}", entry.header().encryption())),
             content_sha256,
@@ -569,7 +573,7 @@ where
                     permission: None,
                     owner: None,
                     group: None,
-                    xattrs: Vec::new(),
+                    xattrs: None,
                     compression: None,
                     encryption: None,
                     content_sha256: None,
@@ -587,26 +591,16 @@ where
     Ok((after, items))
 }
 
+// Owner and group are compared as the bare numeric id so that an archive and
+// the folder it was created from agree. A folder scan only ever produces the
+// numeric uid/gid (`owner_string`/`group_string`), so archives must not add the
+// user/group name here or every such file would report a spurious difference.
 fn archive_owner(metadata: &libpna::Metadata) -> Option<String> {
-    match (metadata.owner_user_name(), metadata.owner_uid()) {
-        (Some(name), Some(id)) if !name.as_str().is_empty() => {
-            Some(format!("{} ({})", name.as_str(), id.get()))
-        }
-        (Some(name), _) if !name.as_str().is_empty() => Some(name.as_str().into()),
-        (_, Some(id)) => Some(id.get().to_string()),
-        _ => None,
-    }
+    metadata.owner_uid().map(|id| id.get().to_string())
 }
 
 fn archive_group(metadata: &libpna::Metadata) -> Option<String> {
-    match (metadata.owner_group_name(), metadata.owner_gid()) {
-        (Some(name), Some(id)) if !name.as_str().is_empty() => {
-            Some(format!("{} ({})", name.as_str(), id.get()))
-        }
-        (Some(name), _) if !name.as_str().is_empty() => Some(name.as_str().into()),
-        (_, Some(id)) => Some(id.get().to_string()),
-        _ => None,
-    }
+    metadata.owner_gid().map(|id| id.get().to_string())
 }
 
 fn archive_stamp(source: &CompareSource) -> io::Result<ComparisonSourceStamp> {
@@ -737,35 +731,32 @@ fn metadata_differences(left: &ComparisonItem, right: &ComparisonItem) -> Vec<Me
         left.modified_at.map(|value| value.to_string()),
         right.modified_at.map(|value| value.to_string()),
     );
-    push_metadata_difference(
-        &mut differences,
-        "accessed_at",
-        left.accessed_at.map(|value| value.to_string()),
-        right.accessed_at.map(|value| value.to_string()),
-    );
-    push_metadata_difference(
+    // Access time is intentionally excluded: it is not part of the source
+    // fingerprint (see `folder_content_digest`) and reading a file to hash it
+    // can perturb atime, so treating it as a difference would be noise.
+    push_observed_difference(
         &mut differences,
         "permission",
         left.permission.clone(),
         right.permission.clone(),
     );
-    push_metadata_difference(
+    push_observed_difference(
         &mut differences,
         "owner",
         left.owner.clone(),
         right.owner.clone(),
     );
-    push_metadata_difference(
+    push_observed_difference(
         &mut differences,
         "group",
         left.group.clone(),
         right.group.clone(),
     );
-    push_metadata_difference(
+    push_observed_difference(
         &mut differences,
         "extended_attributes",
-        (!left.xattrs.is_empty()).then(|| left.xattrs.join(", ")),
-        (!right.xattrs.is_empty()).then(|| right.xattrs.join(", ")),
+        left.xattrs.as_ref().map(|xattrs| xattrs.join(", ")),
+        right.xattrs.as_ref().map(|xattrs| xattrs.join(", ")),
     );
     push_metadata_difference(
         &mut differences,
@@ -794,6 +785,21 @@ fn push_metadata_difference(
             left,
             right,
         });
+    }
+}
+
+/// Like `push_metadata_difference`, but only reports a difference when both
+/// sides observed a value. A `None` here means the source cannot express the
+/// field (a folder's extended attributes, or a non-unix folder's permission
+/// mode), not that the values differ, so it must not surface as a difference.
+fn push_observed_difference(
+    differences: &mut Vec<MetadataDifference>,
+    field: &str,
+    left: Option<String>,
+    right: Option<String>,
+) {
+    if let (Some(left), Some(right)) = (left, right) {
+        push_metadata_difference(differences, field, Some(left), Some(right));
     }
 }
 
@@ -871,6 +877,65 @@ mod tests {
 
     fn file_sha256(path: &Path) -> String {
         format!("{:x}", Sha256::digest(fs::read(path).unwrap()))
+    }
+
+    fn sample_file_item() -> ComparisonItem {
+        ComparisonItem {
+            kind: "file".into(),
+            size: Some(4),
+            created_at: Some(100),
+            modified_at: Some(200),
+            accessed_at: Some(300),
+            permission: Some("0644".into()),
+            owner: Some("501".into()),
+            group: Some("20".into()),
+            xattrs: Some(Vec::new()),
+            compression: Some("No".into()),
+            encryption: Some("No".into()),
+            content_sha256: Some(format!("{:x}", Sha256::digest(b"same"))),
+        }
+    }
+
+    #[test]
+    fn access_time_is_not_reported_as_a_metadata_difference() {
+        // BE-COMPARE-ACCESSED-AT-NOT-DIFFERENCE
+        let left = sample_file_item();
+        let mut right = left.clone();
+        right.accessed_at = Some(999);
+        assert!(metadata_differences(&left, &right).is_empty());
+    }
+
+    #[test]
+    fn metadata_only_one_side_can_observe_is_not_reported() {
+        // BE-COMPARE-UNOBSERVED-METADATA-SKIPPED
+        // A folder on Windows cannot express a permission mode, and folder
+        // scanning cannot read extended attributes without an extra dependency;
+        // such one-sided values must not masquerade as differences.
+        let left = sample_file_item();
+        let mut right = left.clone();
+        right.permission = None;
+        right.owner = None;
+        right.group = None;
+        right.xattrs = None;
+        assert!(metadata_differences(&left, &right).is_empty());
+    }
+
+    #[test]
+    fn metadata_both_sides_observe_is_reported_when_it_differs() {
+        // BE-COMPARE-OBSERVED-METADATA-REPORTED
+        let left = sample_file_item();
+        let mut right = left.clone();
+        right.owner = Some("502".into());
+        right.xattrs = Some(vec!["user.tag:abcd".into()]);
+        let fields = metadata_differences(&left, &right)
+            .into_iter()
+            .map(|difference| difference.field)
+            .collect::<Vec<_>>();
+        assert!(fields.contains(&"owner".to_string()), "{fields:?}");
+        assert!(
+            fields.contains(&"extended_attributes".to_string()),
+            "{fields:?}"
+        );
     }
 
     fn generated_test_password() -> String {
@@ -1063,6 +1128,28 @@ mod tests {
         assert_eq!(kinds["added.txt"], DifferenceKind::Added);
         assert_eq!(file_sha256(&archive), before_archive);
         assert_eq!(fs::read(folder.join("docs/same.txt")).unwrap(), b"same");
+
+        // The identical file only differs in fields the archive genuinely stored
+        // differently (timestamps). Owner, permission, access time, and extended
+        // attributes must not appear: the archive does not observe them the same
+        // way a folder scan does, and reporting them would be spurious noise.
+        let same = report
+            .differences
+            .iter()
+            .find(|difference| difference.path == "docs/same.txt")
+            .expect("docs/same.txt is present");
+        let fields = same
+            .metadata_differences
+            .iter()
+            .map(|difference| difference.field.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            fields.iter().all(|field| matches!(
+                *field,
+                "created_at" | "modified_at" | "compression" | "encryption"
+            )),
+            "unexpected spurious metadata differences: {fields:?}"
+        );
     }
 
     #[test]
@@ -1079,7 +1166,7 @@ mod tests {
                 permission: Some("0644".into()),
                 owner: Some("501".into()),
                 group: Some("20".into()),
-                xattrs: Vec::new(),
+                xattrs: None,
                 compression: Some("No".into()),
                 encryption: Some("No".into()),
                 content_sha256: Some(format!("{:x}", Sha256::digest(b"content"))),

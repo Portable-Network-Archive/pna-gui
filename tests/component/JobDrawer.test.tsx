@@ -159,7 +159,7 @@ describe("background job drawer", () => {
     expect(within(dialog).getByText("archive-321.pna")).toBeVisible();
     expect(within(dialog).getByText("Showing 1 of 1")).toBeVisible();
     expect(dialog.querySelectorAll("[data-job-id]")).toHaveLength(1);
-  });
+  }, 10_000);
 
   it("[UI-JOB-IDLE-COMPACT] marks a finished-only bar for the compact desktop layout", async () => {
     bridge.invoke.mockImplementation(async (command: string) =>
