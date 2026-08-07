@@ -61,6 +61,12 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
+    "webdriver": {
+      "undici": "6.28.0"
+    },
+    "cheerio": {
+      "undici": "7.29.0"
+    },
     "@wdio/tauri-service": {
       "@wdio/native-utils": "2.5.0"
     }
