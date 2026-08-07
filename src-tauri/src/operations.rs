@@ -7,8 +7,9 @@ use std::{
 };
 
 use libpna::{
-    Archive, Chunk, ChunkType, EntryBuilder, EntryName, EntryPart, NormalEntry, PermissionMode,
-    RawChunk, ReadEntry, SolidEntryBuilder, WriteOptions, MIN_CHUNK_BYTES_SIZE, PNA_HEADER,
+    Archive, Chunk, ChunkType, EntryBuilder, EntryName, EntryPart, Metadata, NormalEntry,
+    PermissionMode, RawChunk, ReadEntry, SolidEntryBuilder, WriteOptions, MIN_CHUNK_BYTES_SIZE,
+    PNA_HEADER,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1421,10 +1422,10 @@ where
                     .with_owner_group_sid(source.owner_group_sid().cloned())
                     .with_permission_mode(source.permission_mode());
             }
-            let mut updated = entry.with_metadata(metadata);
-            if !request.keep_xattrs {
-                updated = updated.with_xattrs(&[]);
+            if request.keep_xattrs {
+                metadata = metadata.with_xattrs(source.xattrs().to_vec());
             }
+            let mut updated = entry.with_metadata(metadata);
             if !request.keep_private_chunks {
                 let integrity = updated
                     .extra_chunks()
@@ -2341,14 +2342,15 @@ mod tests {
         let file = fs::File::create(&source).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let mut builder = EntryBuilder::new_file("meta.txt".into(), WriteOptions::store()).unwrap();
-        builder
-            .created(Duration::seconds(123))
-            .permission_mode(PermissionMode::from(0o640));
-        #[cfg(not(windows))]
-        builder.add_xattr(ExtendedAttribute::new(
-            XattrName::try_from("user.pna-test").unwrap(),
-            XattrValue::try_from(b"retained".as_slice()).unwrap(),
-        ));
+        builder.metadata(
+            Metadata::new()
+                .with_created(Some(Duration::seconds(123)))
+                .with_permission_mode(Some(PermissionMode::from(0o640)))
+                .with_xattrs(vec![ExtendedAttribute::new(
+                    XattrName::try_from("user.pna-test").unwrap(),
+                    XattrValue::try_from(b"retained".as_slice()).unwrap(),
+                )]),
+        );
         builder.add_extra_chunk(RawChunk::from_data(
             ChunkType::private(*b"ptSt").unwrap(),
             b"private metadata".to_vec(),
@@ -2400,7 +2402,6 @@ mod tests {
             retained.metadata().permission_mode(),
             Some(PermissionMode::from(0o640))
         );
-        #[cfg(not(windows))]
         assert_eq!(retained.xattrs().len(), 1);
         assert!(retained
             .extra_chunks()
