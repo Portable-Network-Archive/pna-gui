@@ -50,7 +50,11 @@ jobs:
         run: |
           export TAURI_TEST_PASSWORD="ci-only-tauri-action-v1"
           npm exec -- tauri signer generate --ci --write-keys "$RUNNER_TEMP/tauri-action-v1.key" --password "$TAURI_TEST_PASSWORD"
-          echo "TAURI_SIGNING_PRIVATE_KEY_PATH=$RUNNER_TEMP/tauri-action-v1.key" >> "$GITHUB_ENV"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<TAURI_TEST_KEY"
+            cat "$RUNNER_TEMP/tauri-action-v1.key"
+            echo "TAURI_TEST_KEY"
+          } >> "$GITHUB_ENV"
           echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TAURI_TEST_PASSWORD" >> "$GITHUB_ENV"
       - name: Build with tauri-action v1 without a Release
         uses: tauri-apps/tauri-action@v1
