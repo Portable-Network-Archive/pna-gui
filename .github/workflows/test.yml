@@ -1,4 +1,4 @@
-name: test
+name: test # Re-run PR checks for dependency compatibility updates
 on:
   pull_request:
   push:
