@@ -60,9 +60,6 @@ jobs:
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
           uploadWorkflowArtifacts: true
-        env:
-          TAURI_SIGNING_PRIVATE_KEY_PATH: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PATH }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Verify artifacts, signatures, latest.json contract, and migration
         run: node scripts/verify-tauri-action-v1.mjs
       - name: Retain the generated latest.json as a workflow artifact
