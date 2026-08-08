@@ -65,7 +65,9 @@ jobs:
           uploadUpdaterSignatures: true
           uploadWorkflowArtifacts: true
       - name: Verify artifacts, signatures, latest.json contract, and migration
-        run: node scripts/verify-tauri-action-v1.mjs
+        run: >-
+          node scripts/verify-tauri-action-v1.mjs
+          ${{ matrix.platform == 'macos-latest' && 'src-tauri/target/aarch64-apple-darwin/release/bundle' || 'src-tauri/target/release/bundle' }}
       - name: Retain the generated latest.json as a workflow artifact
         uses: actions/upload-artifact@v4
         with:

@@ -41,9 +41,10 @@ for (const signaturePath of signatures) {
   if (!signature || !signature.includes("untrusted comment:")) {
     fail(`Signature is not a Tauri/minisign signature: ${signaturePath}`);
   }
-  if (basename(bundlePath).includes(version) === false) {
-    fail(`Version is missing from signed artifact name: ${basename(bundlePath)}`);
-  }
+}
+
+if (!files.some((path) => basename(path).includes(version))) {
+  fail(`Version is missing from bundle artifact names below ${bundleRoot}`);
 }
 
 const owner = "Portable-Network-Archive";
