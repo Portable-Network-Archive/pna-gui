@@ -53,7 +53,7 @@ jobs:
           {
             echo "TAURI_SIGNING_PRIVATE_KEY<<TAURI_TEST_KEY"
             cat "$RUNNER_TEMP/tauri-action-v1.key"
-            echo "TAURI_TEST_KEY"
+            printf '\nTAURI_TEST_KEY\n'
           } >> "$GITHUB_ENV"
           echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TAURI_TEST_PASSWORD" >> "$GITHUB_ENV"
       - name: Build with tauri-action v1 without a Release
