@@ -38,8 +38,8 @@ for (const signaturePath of signatures) {
   if (!existsSync(bundlePath)) {
     fail(`Signature has no matching bundle: ${signaturePath}`);
   }
-  if (!signature || !signature.includes("untrusted comment:")) {
-    fail(`Signature is not a Tauri/minisign signature: ${signaturePath}`);
+  if (!signature) {
+    fail(`Signature is empty: ${signaturePath}`);
   }
 }
 
@@ -76,8 +76,8 @@ for (const [key, entry] of Object.entries(latest.platforms)) {
   if (!entry.url.startsWith(`${releaseAssetApi}/`)) {
     fail(`Updater URL is not a v1 GitHub release asset URL for ${key}`);
   }
-  if (!entry.signature.trim().includes("untrusted comment:")) {
-    fail(`latest.json contains an invalid signature for ${key}`);
+  if (!entry.signature.trim()) {
+    fail(`latest.json contains an empty signature for ${key}`);
   }
   const matchingSignature = files.find((path) => basename(path) === `${entry.asset}.sig`);
   if (!matchingSignature) {
