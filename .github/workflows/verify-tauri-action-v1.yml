@@ -1,0 +1,75 @@
+name: verify tauri-action v1 release contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/publish.yml"
+      - ".github/workflows/test.yml"
+      - ".github/workflows/verify-tauri-action-v1.yml"
+      - "src-tauri/**"
+      - "scripts/verify-tauri-action-v1.mjs"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  verify:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+      - name: Install Linux dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: npm ci
+      - name: Generate an ephemeral updater key
+        shell: bash
+        run: |
+          export TAURI_TEST_PASSWORD="ci-only-tauri-action-v1"
+          npm exec -- tauri signer generate --ci --write-keys "$RUNNER_TEMP/tauri-action-v1.key" --password "$TAURI_TEST_PASSWORD"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<TAURI_TEST_KEY"
+            cat "$RUNNER_TEMP/tauri-action-v1.key"
+            printf '\nTAURI_TEST_KEY\n'
+          } >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TAURI_TEST_PASSWORD" >> "$GITHUB_ENV"
+      - name: Build with tauri-action v1 without a Release
+        uses: tauri-apps/tauri-action@v1
+        with:
+          tauriScript: "npm run tauri"
+          args: ${{ matrix.args }}
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          uploadWorkflowArtifacts: true
+      - name: Verify artifacts, signatures, latest.json contract, and migration
+        run: >-
+          node scripts/verify-tauri-action-v1.mjs
+          ${{ matrix.platform == 'macos-latest' && 'src-tauri/target/aarch64-apple-darwin/release/bundle' || 'src-tauri/target/release/bundle' }}
+      - name: Retain the generated latest.json as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-action-v1-latest-json-${{ matrix.platform }}
+          path: target/tauri-action-v1-verification/latest.json
