@@ -821,6 +821,7 @@ mod tests {
         let mut archive = Archive::write_header(file).unwrap();
         let options = WriteOptions::builder()
             .encryption(libpna::Encryption::Aes)
+            .cipher_mode(libpna::CipherMode::CTR)
             .password(Some(password))
             .build();
         let mut entry = EntryBuilder::new_file(EntryName::from("secret.txt"), options).unwrap();
