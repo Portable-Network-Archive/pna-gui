@@ -24,6 +24,11 @@
     },
     "target": "ES2017"
   },
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ],
   "include": [
     "next-env.d.ts",
     "src/**/*.ts",
