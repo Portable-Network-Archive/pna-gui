@@ -8,5 +8,12 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true
-  }
+  },
+  "include": [
+    "playwright-ct.config.ts",
+    "playwright/index.ts",
+    "playwright/styles.d.ts",
+    "vitest.config.ts",
+    "wdio.conf.ts"
+  ]
 }
