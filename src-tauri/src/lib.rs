@@ -5,6 +5,7 @@ mod jobs;
 mod operations;
 mod reader;
 mod reports;
+mod updates;
 mod utils;
 mod verification;
 
@@ -607,6 +608,7 @@ pub fn run() {
     builder
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
+            app.manage(updates::UpdateState::default());
             app.manage(reader::ReaderState::new(app_data_dir.join("recent.json")));
             app.manage(jobs::JobManager::persistent(
                 app_data_dir.join("verification-reports.json"),
@@ -815,6 +817,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            updates::update_check,
+            updates::update_install,
             create,
             extract,
             job_start_create,

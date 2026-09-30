@@ -89,6 +89,7 @@ import JobDrawer from "./features/jobs/JobDrawer";
 import ComparisonView from "./features/comparison/ComparisonView";
 import VerificationDialog from "./features/verification/VerificationDialog";
 import VerificationResultsDialog from "./features/verification/VerificationResultsDialog";
+import UpdateDialog from "./features/updates/UpdateDialog";
 
 registerE2eBridge();
 
@@ -175,7 +176,7 @@ function AppContent() {
   }, []);
 
   const openArchivePath = useCallback(
-    async (path: string, suppliedPassword?: string) => {
+    async (path: string, suppliedPassword?: string, showBrowser = true) => {
       if (openingRef.current) return;
       if (
         suppliedPassword === undefined &&
@@ -194,7 +195,7 @@ function AppContent() {
           password: suppliedPassword,
         };
         setOpenArchive(result);
-        setView("browser");
+        if (showBrowser) setView("browser");
         setPasswordPath(undefined);
         setPassword("");
         setPasswordError(undefined);
@@ -352,7 +353,7 @@ function AppContent() {
         pendingRefreshRef.current = request;
         return;
       }
-      await openArchivePath(request.path, request.password);
+      await openArchivePath(request.path, request.password, false);
     },
     [openArchivePath],
   );
@@ -363,7 +364,7 @@ function AppContent() {
     if (!pending) return;
     pendingRefreshRef.current = undefined;
     if (activeArchiveRef.current?.archive.summary.path === pending.path) {
-      void openArchivePath(pending.path, pending.password);
+      void openArchivePath(pending.path, pending.password, false);
     }
   }, [busy, openArchivePath]);
 
@@ -439,6 +440,7 @@ function AppContent() {
 
   return (
     <div className={styles.root}>
+      <UpdateDialog />
       {view === "home" && (
         <HomeView
           productName={bootstrap.productName}
@@ -905,6 +907,12 @@ function BrowserView({
   const [details, setDetails] = useState<EntryDetails>();
   const [preview, setPreview] = useState<PreviewDescriptor>();
   const [treePages, setTreePages] = useState<TreePages>({});
+  const [treeCursors, setTreeCursors] = useState<
+    Record<string, string | undefined>
+  >({});
+  const [treeLoading, setTreeLoading] = useState<Set<string>>(new Set());
+  const treeRequestsRef = useRef(new Set<string>());
+  const selectionRequestRef = useRef(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["root"]));
   const [extractOpen, setExtractOpen] = useState(false);
   const [appendOpen, setAppendOpen] = useState(false);
@@ -973,22 +981,39 @@ function BrowserView({
   }, [details]);
 
   const loadTreeChildren = useCallback(
-    async (parentId?: string) => {
+    async (parentId?: string, cursor?: string) => {
       const key = parentId ?? "root";
-      if (treePages[key]) return;
+      if ((!cursor && treePages[key]) || treeRequestsRef.current.has(key))
+        return;
+      treeRequestsRef.current.add(key);
+      setTreeLoading((current) => new Set(current).add(key));
       try {
         const page = await archiveApi.children(
           archive.handle,
           parentId,
-          undefined,
+          cursor,
           { field: "name", direction: "asc" },
+          ["directory"],
         );
         setTreePages((currentPages) => ({
           ...currentPages,
-          [key]: page.items,
+          [key]: cursor
+            ? [...(currentPages[key] ?? []), ...page.items]
+            : page.items,
+        }));
+        setTreeCursors((current) => ({
+          ...current,
+          [key]: page.nextCursor ?? undefined,
         }));
       } catch (caught) {
         onError(normalizeAppError(caught));
+      } finally {
+        treeRequestsRef.current.delete(key);
+        setTreeLoading((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        });
       }
     },
     [archive.handle, onError, treePages],
@@ -1000,6 +1025,7 @@ function BrowserView({
 
   useEffect(() => {
     let active = true;
+    selectionRequestRef.current += 1;
     setListBusy(true);
     setSelectedId(undefined);
     setDetails(undefined);
@@ -1018,6 +1044,7 @@ function BrowserView({
       .finally(() => active && setListBusy(false));
     return () => {
       active = false;
+      selectionRequestRef.current += 1;
     };
   }, [archive.handle, current.id, onError, query, sort]);
 
@@ -1043,17 +1070,21 @@ function BrowserView({
   };
 
   const selectEntry = async (entry: ArchiveEntry) => {
+    const request = ++selectionRequestRef.current;
     setSelectedId(entry.id);
     setDetails(undefined);
     setPreview(undefined);
     try {
       const detail = await archiveApi.details(archive.handle, entry.id);
+      if (selectionRequestRef.current !== request) return;
       setDetails(detail);
       if (entry.kind === "file") {
-        setPreview(await archiveApi.preview(archive.handle, entry.id));
+        const preview = await archiveApi.preview(archive.handle, entry.id);
+        if (selectionRequestRef.current === request) setPreview(preview);
       }
     } catch (caught) {
-      onError(normalizeAppError(caught));
+      if (selectionRequestRef.current === request)
+        onError(normalizeAppError(caught));
     }
   };
 
@@ -1271,6 +1302,14 @@ function BrowserView({
             parentKey="root"
             trail={[rootLocation]}
             pages={treePages}
+            cursors={treeCursors}
+            loading={treeLoading}
+            onLoadMore={(key) =>
+              loadTreeChildren(
+                key === "root" ? undefined : key,
+                treeCursors[key],
+              )
+            }
             expanded={expanded}
             selectedId={current.id}
             onToggle={async (entry) => {
@@ -2449,6 +2488,9 @@ function TreeBranch({
   parentKey,
   trail,
   pages,
+  cursors,
+  loading,
+  onLoadMore,
   expanded,
   selectedId,
   onToggle,
@@ -2457,6 +2499,9 @@ function TreeBranch({
   parentKey: string;
   trail: FolderLocation[];
   pages: TreePages;
+  cursors: Record<string, string | undefined>;
+  loading: Set<string>;
+  onLoadMore: (key: string) => Promise<void>;
   expanded: Set<string>;
   selectedId?: string;
   onToggle: (entry: ArchiveEntry) => Promise<void>;
@@ -2490,6 +2535,9 @@ function TreeBranch({
                 parentKey={entry.id}
                 trail={entryTrail}
                 pages={pages}
+                cursors={cursors}
+                loading={loading}
+                onLoadMore={onLoadMore}
                 expanded={expanded}
                 selectedId={selectedId}
                 onToggle={onToggle}
@@ -2499,6 +2547,18 @@ function TreeBranch({
           </div>
         );
       })}
+      {cursors[parentKey] && (
+        <Button
+          type="button"
+          size="1"
+          variant="ghost"
+          disabled={loading.has(parentKey)}
+          aria-label={t("loadMoreFolders")}
+          onClick={() => void onLoadMore(parentKey)}
+        >
+          {loading.has(parentKey) ? t("loading") : t("loadMoreFolders")}
+        </Button>
+      )}
     </div>
   );
 }

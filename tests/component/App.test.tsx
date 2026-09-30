@@ -22,6 +22,7 @@ const bridge = vi.hoisted(() => ({
   menuHandler: undefined as
     | ((event: { payload: "extract" | "create" }) => void)
     | undefined,
+  updateHandler: undefined as (() => void) | undefined,
   jobHandlers: [] as Array<(event: { payload: JobSnapshot }) => void>,
   setZoom: vi.fn(),
 }));
@@ -50,6 +51,8 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
       event: string,
       handler: (event: { payload: T }) => void,
     ) => {
+      if (event === "tauri://update")
+        bridge.updateHandler = handler as () => void;
       if (event === "switch_tab")
         bridge.menuHandler = handler as typeof bridge.menuHandler;
       if (event === "job-update") {
@@ -241,6 +244,7 @@ describe("application shell", () => {
     bridge.dragHandlers = [];
     bridge.menuHandler = undefined;
     bridge.jobHandlers = [];
+    bridge.updateHandler = undefined;
     bridge.setZoom.mockReset().mockResolvedValue(undefined);
     document.documentElement.lang = "en";
   });
@@ -465,6 +469,125 @@ describe("application shell", () => {
     expect(row).not.toHaveTextContent("NaN");
     expect(row).not.toHaveTextContent("1970");
     expect(within(row).getAllByText("—")).toHaveLength(5);
+  });
+
+  it("keeps the latest selected file preview when an older response finishes last", async () => {
+    installInvokeHandler({ recentItems: [recent] });
+    const originalInvoke = bridge.invoke.getMockImplementation()!;
+    const files: ArchiveEntry[] = ["a", "b"].map((name) => ({
+      ...directory,
+      id: name,
+      name: `${name}.txt`,
+      path: `${name}.txt`,
+      kind: "file",
+      hasChildren: false,
+    }));
+    let finishOldPreview!: (value: unknown) => void;
+    const oldPreview = new Promise((resolve) => {
+      finishOldPreview = resolve;
+    });
+    bridge.invoke.mockImplementation(
+      (command: string, args?: Record<string, unknown>) => {
+        if (command === "archive_children")
+          return Promise.resolve({
+            items: files,
+            nextCursor: null,
+            totalCount: 2,
+          });
+        if (command === "archive_entry_details")
+          return Promise.resolve({
+            entry: files.find((file) => file.id === args?.entryId),
+            xattrCount: 0,
+          });
+        if (command === "archive_preview")
+          return args?.entryId === "a"
+            ? oldPreview
+            : Promise.resolve({
+                kind: "text",
+                text: "B contents",
+                byteCount: 10,
+                truncated: false,
+              });
+        return originalInvoke(command, args);
+      },
+    );
+    renderApp();
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /^demo\.pna \/tmp\/demo\.pna$/,
+      }),
+    );
+    await userEvent.click(
+      await screen.findByRole("row", { name: /a.txt File/ }),
+    );
+    await waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith(
+        "archive_preview",
+        expect.objectContaining({ entryId: "a" }),
+      ),
+    );
+    await userEvent.click(screen.getByRole("row", { name: /b.txt File/ }));
+    expect(await screen.findByTestId("archive-preview")).toHaveTextContent(
+      "B contents",
+    );
+    await act(async () => {
+      finishOldPreview({
+        kind: "text",
+        text: "A contents",
+        byteCount: 10,
+        truncated: false,
+      });
+    });
+    expect(screen.getByTestId("archive-preview")).toHaveTextContent(
+      "B contents",
+    );
+    expect(
+      within(screen.getByLabelText("Inspector")).getByText("b.txt", {
+        selector: "strong",
+      }),
+    ).toBeVisible();
+  });
+
+  it("loads the folder tree beyond the first API page", async () => {
+    installInvokeHandler({ recentItems: [recent] });
+    const originalInvoke = bridge.invoke.getMockImplementation()!;
+    const folders = Array.from({ length: 201 }, (_, index) => ({
+      ...directory,
+      id: `folder-${index}`,
+      name: `folder-${index}`,
+      path: `folder-${index}`,
+    }));
+    bridge.invoke.mockImplementation(
+      (command: string, args?: Record<string, unknown>) => {
+        if (command === "archive_children")
+          return Promise.resolve({
+            items: args?.cursor ? folders.slice(200) : folders.slice(0, 200),
+            nextCursor: args?.cursor ? null : "200",
+            totalCount: 201,
+          });
+        return originalInvoke(command, args);
+      },
+    );
+    renderApp();
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /^demo\.pna \/tmp\/demo\.pna$/,
+      }),
+    );
+    const tree = await screen.findByLabelText("Archive tree");
+    await userEvent.click(
+      await within(tree).findByRole("button", { name: "Load more folders" }),
+    );
+    expect(
+      await within(tree).findByRole("button", { name: "folder-200" }),
+    ).toBeVisible();
+    expect(
+      within(tree).queryByRole("button", { name: "Load more folders" }),
+    ).not.toBeInTheDocument();
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "archive_children",
+      expect.objectContaining({ cursor: "200", limit: 200 }),
+    );
   });
 
   it("[UI-SESSION-CLOSE-ERROR] returns home and preserves a close failure as collapsed technical evidence", async () => {
@@ -1581,6 +1704,132 @@ describe("application shell", () => {
     expect(
       screen.queryByRole("dialog", { name: "Password required" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("preserves a creation draft when an edit to the retained archive finishes", async () => {
+    await openRecentArchive();
+    await userEvent.keyboard("{Control>}n{/Control}");
+    bridge.openDialog.mockResolvedValueOnce(["/tmp/draft.txt"]);
+    await userEvent.click(screen.getByRole("button", { name: "Add files" }));
+    expect(await screen.findByText("/tmp/draft.txt")).toBeVisible();
+    const originalInvoke = bridge.invoke.getMockImplementation()!;
+    bridge.invoke.mockImplementation(
+      (command: string, args?: Record<string, unknown>) => {
+        if (command === "archive_open")
+          return Promise.resolve({
+            handle: "refreshed",
+            summary: { ...summary, handle: "refreshed" },
+          });
+        return originalInvoke(command, args);
+      },
+    );
+    act(() =>
+      bridge.jobHandlers.forEach((handler) =>
+        handler({
+          payload: {
+            id: "finished-edit",
+            kind: "append",
+            status: "succeeded",
+            phase: "done",
+            completedUnits: 1,
+            outputPath: recent.path,
+          },
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith("archive_close", {
+        handle: summary.handle,
+      }),
+    );
+    expect(screen.getByText("/tmp/draft.txt")).toBeVisible();
+    expect(screen.queryByTestId("archive-browser")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      result: null,
+      error: undefined,
+      expected: "You are using the latest version.",
+    },
+    {
+      result: null,
+      error: "network unavailable",
+      expected: "The update could not be completed.",
+    },
+  ])(
+    "reports the native update check outcome: $expected",
+    async ({ result, error, expected }) => {
+      await renderHome();
+      const originalInvoke = bridge.invoke.getMockImplementation()!;
+      bridge.invoke.mockImplementation(
+        (command: string, args?: Record<string, unknown>) => {
+          if (command === "update_check")
+            return error ? Promise.reject(error) : Promise.resolve(result);
+          return originalInvoke(command, args);
+        },
+      );
+      await waitFor(() => expect(bridge.updateHandler).toBeDefined());
+      await act(async () => {
+        await bridge.updateHandler?.();
+      });
+      const dialog = await screen.findByRole("dialog", {
+        name: "Software update",
+      });
+      expect(await within(dialog).findByText(expected)).toBeVisible();
+      expect(
+        bridge.invoke.mock.calls.filter(
+          ([command]) => command === "update_check",
+        ),
+      ).toHaveLength(1);
+      expect(bridge.invoke).not.toHaveBeenCalledWith(
+        "update_install",
+        expect.anything(),
+      );
+    },
+  );
+
+  it("installs an available update only after confirmation", async () => {
+    await renderHome();
+    const originalInvoke = bridge.invoke.getMockImplementation()!;
+    bridge.invoke.mockImplementation(
+      (command: string, args?: Record<string, unknown>) => {
+        if (command === "update_check")
+          return Promise.resolve({ version: "0.2.0" });
+        if (command === "update_install") return Promise.resolve();
+        return originalInvoke(command, args);
+      },
+    );
+    await waitFor(() => expect(bridge.updateHandler).toBeDefined());
+    await act(async () => {
+      await bridge.updateHandler?.();
+    });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Software update",
+    });
+    const install = await within(dialog).findByRole("button", {
+      name: "Install update",
+    });
+    expect(dialog).toHaveTextContent("0.2.0");
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) => command === "update_install",
+      ),
+    ).toHaveLength(0);
+    await userEvent.click(install);
+    expect(
+      await within(dialog).findByText(
+        "The update is installed. Restart the application to use it.",
+      ),
+    ).toBeVisible();
+    expect(bridge.invoke).toHaveBeenCalledWith("update_install", {
+      version: "0.2.0",
+    });
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) => command === "update_install",
+      ),
+    ).toHaveLength(1);
   });
 
   it("[UI-MENU-CREATE] routes the native create menu and [UI-MENU-OPEN] routes the native open menu", async () => {

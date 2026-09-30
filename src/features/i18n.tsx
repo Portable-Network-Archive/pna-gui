@@ -9,6 +9,17 @@ import {
 } from "react";
 
 const ENGLISH = {
+  updateTitle: "Software update",
+  updateChecking: "Checking for updates…",
+  updateAvailable:
+    "Version {version} is available. Installation may restart the application. Finish your current work before installing.",
+  updateInstalling: "Downloading and installing the update…",
+  updateInstalled:
+    "The update is installed. Restart the application to use it.",
+  updateCurrent: "You are using the latest version.",
+  updateFailed: "The update could not be completed.",
+  updateInstall: "Install update",
+  loadMoreFolders: "Load more folders",
   root: "Root",
   openArchiveTitle: "Open PNA archive",
   backHome: "Back to Home",
@@ -483,6 +494,17 @@ const ENGLISH = {
 export type TranslationKey = keyof typeof ENGLISH;
 
 const JAPANESE: Record<TranslationKey, string> = {
+  updateTitle: "ソフトウェアの更新",
+  updateChecking: "更新を確認しています…",
+  updateAvailable:
+    "バージョン {version} が利用可能です。インストール時にアプリが再起動する場合があります。現在の作業を終えてからインストールしてください。",
+  updateInstalling: "更新をダウンロードしてインストールしています…",
+  updateInstalled:
+    "更新をインストールしました。アプリを再起動すると更新が適用されます。",
+  updateCurrent: "最新のバージョンを使用しています。",
+  updateFailed: "更新を完了できませんでした。",
+  updateInstall: "更新をインストール",
+  loadMoreFolders: "フォルダーをさらに表示",
   root: "ルート",
   openArchiveTitle: "PNAアーカイブを開く",
   backHome: "ホームへ戻る",

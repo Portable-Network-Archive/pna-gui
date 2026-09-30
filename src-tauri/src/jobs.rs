@@ -238,6 +238,34 @@ impl ResourceAccess {
     }
 }
 
+fn ensure_no_conflicting_job(
+    request: &JobRequest,
+    records: &BTreeMap<String, JobRecord>,
+) -> io::Result<()> {
+    let requested_accesses = request.resource_accesses();
+    let conflict = records.values().any(|record| {
+        matches!(
+            record.snapshot.status,
+            JobStatus::Queued | JobStatus::Running | JobStatus::CancelRequested
+        ) && record.request.as_ref().is_some_and(|existing| {
+            let existing_accesses = existing.resource_accesses();
+            requested_accesses.iter().any(|candidate| {
+                existing_accesses
+                    .iter()
+                    .any(|active| candidate.conflicts_with(active))
+            })
+        })
+    });
+    if conflict {
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "a conflicting archive operation is already in progress",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 enum JobExecutionOutcome {
     Operation(crate::operations::OperationOutcome),
     Verification(VerificationReport),
@@ -362,26 +390,7 @@ impl JobManager {
         let cancelled = Arc::new(AtomicBool::new(false));
         let snapshot = {
             let mut records = self.inner.records.lock().unwrap();
-            let requested_accesses = request.resource_accesses();
-            let conflict = records.values().any(|record| {
-                matches!(
-                    record.snapshot.status,
-                    JobStatus::Queued | JobStatus::Running | JobStatus::CancelRequested
-                ) && record.request.as_ref().is_some_and(|existing| {
-                    let existing_accesses = existing.resource_accesses();
-                    requested_accesses.iter().any(|candidate| {
-                        existing_accesses
-                            .iter()
-                            .any(|active| candidate.conflicts_with(active))
-                    })
-                })
-            });
-            if conflict {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "a conflicting archive operation is already in progress",
-                ));
-            }
+            ensure_no_conflicting_job(&request, &records)?;
             records.insert(
                 id.clone(),
                 JobRecord {
@@ -496,7 +505,7 @@ impl JobManager {
         let (request, snapshot) = {
             let mut records = self.inner.records.lock().unwrap();
             let record = records
-                .get_mut(id)
+                .get(id)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "job not found"))?;
             if !matches!(
                 record.snapshot.status,
@@ -513,6 +522,10 @@ impl JobManager {
                     "a restored job cannot be retried because its secret-bearing request was not persisted",
                 )
             })?;
+            ensure_no_conflicting_job(&request, &records)?;
+            let record = records
+                .get_mut(id)
+                .expect("the retry record remains present");
             record.cancelled = cancelled.clone();
             record.observer = observer.clone();
             record.snapshot.status = JobStatus::Queued;
@@ -1760,6 +1773,37 @@ mod tests {
             )
             .expect("an unrelated output remains concurrent");
         assert_eq!(manager.list().len(), 2);
+    }
+
+    #[test]
+    fn retry_rejects_an_active_conflict_without_changing_the_failed_job() {
+        let manager = JobManager::default();
+        let request = JobRequest::Delete(crate::operations::DeleteEntriesRequest {
+            archive_path: PathBuf::from("/archives/project.pna"),
+            entries: vec![PathBuf::from("entry.txt")],
+            password: None,
+        });
+        let observer: Arc<dyn Fn(JobSnapshot) + Send + Sync> = Arc::new(|_| {});
+        let first = manager
+            .start_with_spawner(request.clone(), observer.clone(), |_, _| Ok(()))
+            .unwrap();
+        manager.update(&first.id, &observer, |snapshot| {
+            snapshot.status = JobStatus::Failed
+        });
+        manager
+            .start_with_spawner(request, observer.clone(), |_, _| Ok(()))
+            .unwrap();
+        let error = manager.retry(&first.id, observer).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            manager
+                .list()
+                .iter()
+                .find(|snapshot| snapshot.id == first.id)
+                .unwrap()
+                .status,
+            JobStatus::Failed
+        );
     }
 
     #[test]

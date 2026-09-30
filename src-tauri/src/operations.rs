@@ -202,6 +202,7 @@ where
     let mut archive = Archive::read_header(file)?;
     let mut completed = Vec::new();
     let mut completed_units = 0_u64;
+    let mut directory_permissions = Vec::new();
     let mut warnings = Vec::new();
     let password = request.password.as_deref();
 
@@ -219,6 +220,10 @@ where
             match entry.header().data_kind() {
                 libpna::DataKind::Directory => {
                     super::create_safe_directory(&root, &canonical_root, &relative)?;
+                    if request.restore_permissions {
+                        directory_permissions
+                            .push((root.join(&relative), entry.metadata().clone()));
+                    }
                 }
                 libpna::DataKind::File => {
                     let parent = relative.parent().unwrap_or_else(|| Path::new("."));
@@ -270,14 +275,21 @@ where
                         }
                         writer.sync_all()?;
                         check_cancelled(&cancelled)?;
-                        warnings.extend(commit_output(&partial, &target, target.exists())?);
+                        let backup = if request.keep_completed_on_cancel {
+                            warnings.extend(commit_output(&partial, &target, target.exists())?);
+                            None
+                        } else {
+                            replace_output_with(&partial, &target, target.exists(), |from, to| {
+                                fs::rename(from, to)
+                            })?
+                        };
                         partial_guard.commit();
+                        completed.push((target.clone(), backup));
                         restore_permissions(
                             &target,
                             entry.metadata(),
                             request.restore_permissions,
                         )?;
-                        completed.push(target);
                     }
                     completed_units += 1;
                     progress(completed_units, total, &relative.to_string_lossy());
@@ -305,14 +317,43 @@ where
         Ok(())
     })();
 
-    if let Err(error) = result {
-        if cancelled() && !request.keep_completed_on_cancel {
-            for path in completed.iter().rev() {
-                let _ = fs::remove_file(path);
+    if result.is_err() && cancelled() && !request.keep_completed_on_cancel {
+        let mut rollback_errors = Vec::new();
+        for (path, backup) in completed.iter().rev() {
+            let rollback = fs::remove_file(path).and_then(|_| match backup {
+                Some(backup) => fs::rename(backup, path),
+                None => Ok(()),
+            });
+            if let Err(error) = rollback {
+                rollback_errors.push(format!(
+                    "{}: {error}; backup: {}",
+                    path.display(),
+                    backup
+                        .as_ref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "none".into())
+                ));
             }
         }
-        return Err(error);
+        if !rollback_errors.is_empty() {
+            return Err(io::Error::other(format!(
+                "extraction cancellation rollback failed: {}",
+                rollback_errors.join("; ")
+            )));
+        }
+    } else {
+        for (_, backup) in &completed {
+            if let Some(backup) = backup {
+                warnings.extend(remove_previous_output(backup, |path| fs::remove_file(path)));
+            }
+        }
     }
+    // Apply restrictive parent modes only after writing or rolling back their children.
+    directory_permissions.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
+    for (path, metadata) in directory_permissions {
+        restore_permissions(&path, &metadata, true)?;
+    }
+    result?;
 
     Ok(OperationOutcome {
         output_path: root,
@@ -1437,6 +1478,7 @@ where
             }
             Ok(updated)
         },
+        request.keep_private_chunks,
     )
 }
 
@@ -1459,6 +1501,7 @@ where
             let metadata = entry.metadata().clone();
             Ok(entry.with_metadata(metadata))
         },
+        true,
     )
 }
 
@@ -1469,6 +1512,7 @@ fn rewrite_archive_to<C, P, F>(
     cancelled: C,
     mut progress: P,
     mut transform: F,
+    keep_group_chunks: bool,
 ) -> io::Result<OperationOutcome>
 where
     C: Fn() -> bool,
@@ -1515,8 +1559,10 @@ where
                     .cipher_mode(solid.cipher_mode())
                     .password(password);
                 let mut builder = SolidEntryBuilder::new(options.build())?;
-                for chunk in solid.extra_chunks() {
-                    builder.add_extra_chunk(chunk.clone());
+                if keep_group_chunks {
+                    for chunk in solid.extra_chunks() {
+                        builder.add_extra_chunk(chunk.clone());
+                    }
                 }
                 for entry in solid.entries(libpna::ReadOptions::with_password(
                     password.map(str::as_bytes),
@@ -1595,6 +1641,9 @@ fn scan_source(
     result: &mut Vec<ScannedEntry>,
     names: &mut HashSet<PathBuf>,
 ) -> io::Result<()> {
+    super::safe_relative_entry_path(&archive_path)?;
+    EntryName::try_from(archive_path.as_path())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     if !names.insert(archive_path.clone()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -1640,7 +1689,8 @@ fn scan_source(
 }
 
 fn build_scanned_entry(scanned: &ScannedEntry, options: &CreateOptions) -> io::Result<NormalEntry> {
-    let name = EntryName::from_lossy(&scanned.archive_path);
+    let name = EntryName::try_from(scanned.archive_path.as_path())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     if scanned.directory {
         let mut builder = EntryBuilder::new_dir(name);
         apply_permissions(&mut builder, &scanned.source_path, options)?;
@@ -1779,13 +1829,35 @@ fn publish_new_output(partial: &Path, output: &Path) -> io::Result<()> {
     }
 }
 
+fn remove_previous_output(
+    backup: &Path,
+    mut remove: impl FnMut(&Path) -> io::Result<()>,
+) -> Vec<OperationWarning> {
+    remove(backup).err().map(|error| OperationWarning {
+        code: "PREVIOUS_ARCHIVE_NOT_REMOVED".into(),
+        technical_detail: format!("archive was committed, but the previous archive could not be removed at {}: {error}", backup.display()),
+        recovery_path: Some(backup.to_path_buf()),
+    }).into_iter().collect()
+}
+
 fn commit_output_with(
     partial: &Path,
     output: &Path,
     overwrite: bool,
-    mut rename: impl FnMut(&Path, &Path) -> io::Result<()>,
-    mut remove: impl FnMut(&Path) -> io::Result<()>,
+    rename: impl FnMut(&Path, &Path) -> io::Result<()>,
+    remove: impl FnMut(&Path) -> io::Result<()>,
 ) -> io::Result<Vec<OperationWarning>> {
+    Ok(replace_output_with(partial, output, overwrite, rename)?
+        .map(|backup| remove_previous_output(&backup, remove))
+        .unwrap_or_default())
+}
+
+fn replace_output_with(
+    partial: &Path,
+    output: &Path,
+    overwrite: bool,
+    mut rename: impl FnMut(&Path, &Path) -> io::Result<()>,
+) -> io::Result<Option<PathBuf>> {
     if output.exists() {
         if !overwrite {
             return Err(io::Error::new(
@@ -1796,35 +1868,16 @@ fn commit_output_with(
         let backup = unique_sibling_path(output, "backup")?;
         rename(output, &backup)?;
         match rename(partial, output) {
-            Ok(()) => {
-                let warnings = remove(&backup)
-                    .err()
-                    .map(|error| OperationWarning {
-                        code: "PREVIOUS_ARCHIVE_NOT_REMOVED".into(),
-                        technical_detail: format!(
-                            "archive was committed, but the previous archive could not be removed at {}: {error}",
-                            backup.display()
-                        ),
-                        recovery_path: Some(backup.clone()),
-                    })
-                    .into_iter()
-                    .collect();
-                Ok(warnings)
-            }
+            Ok(()) => Ok(Some(backup)),
             Err(commit_error) => match rename(&backup, output) {
                 Ok(()) => Err(commit_error),
-                Err(rollback_error) => Err(io::Error::new(
-                    commit_error.kind(),
-                    format!(
-                        "archive commit failed: {commit_error}; restoring the previous archive also failed: {rollback_error}; the previous archive may still be recovered from {}",
-                        backup.display()
-                    ),
-                )),
+                Err(rollback_error) => Err(io::Error::new(commit_error.kind(), format!(
+                    "archive commit failed: {commit_error}; restoring the previous archive also failed: {rollback_error}; the previous archive may still be recovered from {}", backup.display()))),
             },
         }
     } else {
         rename(partial, output)?;
-        Ok(Vec::new())
+        Ok(None)
     }
 }
 
@@ -2337,77 +2390,115 @@ mod tests {
     #[test]
     fn strip_metadata_applies_each_preservation_boundary_exactly() {
         // BE-NORMALIZE-STRIP-EXACT
-        let temp = tempdir().unwrap();
-        let source = temp.path().join("metadata.pna");
-        let file = fs::File::create(&source).unwrap();
-        let mut archive = Archive::write_header(file).unwrap();
-        let mut builder = EntryBuilder::new_file("meta.txt".into(), WriteOptions::store()).unwrap();
-        builder.metadata(
-            Metadata::new()
-                .with_created(Some(Duration::seconds(123)))
-                .with_permission_mode(Some(PermissionMode::from(0o640)))
-                .with_xattrs(vec![ExtendedAttribute::new(
-                    XattrName::try_from("user.pna-test").unwrap(),
-                    XattrValue::try_from(b"retained".as_slice()).unwrap(),
-                )]),
-        );
-        builder.add_extra_chunk(RawChunk::from_data(
-            ChunkType::private(*b"ptSt").unwrap(),
-            b"private metadata".to_vec(),
-        ));
-        builder.write_all(b"content").unwrap();
-        archive.add_entry(builder.build().unwrap()).unwrap();
-        archive.finalize().unwrap();
-        let original = fs::read(&source).unwrap();
+        for solid in [false, true] {
+            let temp = tempdir().unwrap();
+            let source = temp.path().join("metadata.pna");
+            let file = fs::File::create(&source).unwrap();
+            let mut archive = Archive::write_header(file).unwrap();
+            let mut builder =
+                EntryBuilder::new_file("meta.txt".into(), WriteOptions::store()).unwrap();
+            builder.metadata(
+                Metadata::new()
+                    .with_created(Some(Duration::seconds(123)))
+                    .with_permission_mode(Some(PermissionMode::from(0o640)))
+                    .with_xattrs(vec![ExtendedAttribute::new(
+                        XattrName::try_from("user.pna-test").unwrap(),
+                        XattrValue::try_from(b"retained".as_slice()).unwrap(),
+                    )]),
+            );
+            builder.add_extra_chunk(RawChunk::from_data(
+                ChunkType::private(*b"ptSt").unwrap(),
+                b"private metadata".to_vec(),
+            ));
+            builder.write_all(b"content").unwrap();
+            let entry = builder.build().unwrap();
+            if solid {
+                let mut group = SolidEntryBuilder::new(WriteOptions::store()).unwrap();
+                group.add_extra_chunk(RawChunk::from_data(
+                    ChunkType::private(*b"ptSt").unwrap(),
+                    b"group metadata".to_vec(),
+                ));
+                group.add_entry(entry).unwrap();
+                archive.add_entry(group.build().unwrap()).unwrap();
+            } else {
+                archive.add_entry(entry).unwrap();
+            }
+            archive.finalize().unwrap();
+            let original = fs::read(&source).unwrap();
 
-        let removed = temp.path().join("removed.pna");
-        strip_archive_metadata(
-            &StripMetadataRequest {
-                archive_path: source.clone(),
-                output_path: removed.clone(),
-                password: None,
-                keep_timestamps: false,
-                keep_permissions: false,
-                keep_xattrs: false,
-                keep_private_chunks: false,
-            },
-            || false,
-            |_, _, _| {},
-        )
-        .unwrap();
-        let removed = read_single_normal_entry(&removed);
-        assert_eq!(removed.metadata().created(), None);
-        assert_eq!(removed.metadata().permission_mode(), None);
-        assert!(removed.xattrs().is_empty());
-        assert!(removed.extra_chunks().is_empty());
+            let removed = temp.path().join("removed.pna");
+            strip_archive_metadata(
+                &StripMetadataRequest {
+                    archive_path: source.clone(),
+                    output_path: removed.clone(),
+                    password: None,
+                    keep_timestamps: false,
+                    keep_permissions: false,
+                    keep_xattrs: false,
+                    keep_private_chunks: false,
+                },
+                || false,
+                |_, _, _| {},
+            )
+            .unwrap();
+            if solid {
+                let mut archive = Archive::read_header(fs::File::open(&removed).unwrap()).unwrap();
+                let ReadEntry::Solid(group) = archive.entries().next().unwrap().unwrap() else {
+                    panic!("expected solid storage")
+                };
+                assert!(group.extra_chunks().is_empty());
+            }
+            let removed = Archive::read_header(fs::File::open(&removed).unwrap())
+                .unwrap()
+                .entries_with_options(&ReadOptions::with_password(None::<&[u8]>))
+                .next()
+                .unwrap()
+                .unwrap();
+            assert_eq!(removed.metadata().created(), None);
+            assert_eq!(removed.metadata().permission_mode(), None);
+            assert!(removed.xattrs().is_empty());
+            assert!(removed.extra_chunks().is_empty());
 
-        let retained = temp.path().join("retained.pna");
-        strip_archive_metadata(
-            &StripMetadataRequest {
-                archive_path: source.clone(),
-                output_path: retained.clone(),
-                password: None,
-                keep_timestamps: true,
-                keep_permissions: true,
-                keep_xattrs: true,
-                keep_private_chunks: true,
-            },
-            || false,
-            |_, _, _| {},
-        )
-        .unwrap();
-        let retained = read_single_normal_entry(&retained);
-        assert_eq!(retained.metadata().created(), Some(Duration::seconds(123)));
-        assert_eq!(
-            retained.metadata().permission_mode(),
-            Some(PermissionMode::from(0o640))
-        );
-        assert_eq!(retained.xattrs().len(), 1);
-        assert!(retained
-            .extra_chunks()
-            .iter()
-            .any(|chunk| chunk.ty() == ChunkType::private(*b"ptSt").unwrap()));
-        assert_eq!(fs::read(source).unwrap(), original);
+            let retained = temp.path().join("retained.pna");
+            strip_archive_metadata(
+                &StripMetadataRequest {
+                    archive_path: source.clone(),
+                    output_path: retained.clone(),
+                    password: None,
+                    keep_timestamps: true,
+                    keep_permissions: true,
+                    keep_xattrs: true,
+                    keep_private_chunks: true,
+                },
+                || false,
+                |_, _, _| {},
+            )
+            .unwrap();
+            if solid {
+                let mut archive = Archive::read_header(fs::File::open(&retained).unwrap()).unwrap();
+                let ReadEntry::Solid(group) = archive.entries().next().unwrap().unwrap() else {
+                    panic!("expected solid storage")
+                };
+                assert_eq!(group.extra_chunks().len(), 1);
+            }
+            let retained = Archive::read_header(fs::File::open(&retained).unwrap())
+                .unwrap()
+                .entries_with_options(&ReadOptions::with_password(None::<&[u8]>))
+                .next()
+                .unwrap()
+                .unwrap();
+            assert_eq!(retained.metadata().created(), Some(Duration::seconds(123)));
+            assert_eq!(
+                retained.metadata().permission_mode(),
+                Some(PermissionMode::from(0o640))
+            );
+            assert_eq!(retained.xattrs().len(), 1);
+            assert!(retained
+                .extra_chunks()
+                .iter()
+                .any(|chunk| chunk.ty() == ChunkType::private(*b"ptSt").unwrap()));
+            assert_eq!(fs::read(source).unwrap(), original);
+        }
     }
 
     #[test]
@@ -3233,6 +3324,48 @@ mod tests {
             .contains("partial")));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn create_rejects_unportable_and_non_unicode_sources_before_replacing_output() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        let temp = tempdir().unwrap();
+        let output = temp.path().join("output.pna");
+        let mut names = vec![OsString::from("report:2026.txt"), OsString::from("NUL.txt")];
+        if cfg!(target_os = "linux") {
+            names.push(OsString::from_vec(b"invalid-\xff.txt".to_vec()));
+        }
+        for name in names {
+            let source = temp.path().join(name);
+            fs::write(&source, b"source").unwrap();
+            fs::write(&output, b"original").unwrap();
+            assert!(create_archive(
+                &CreateRequest {
+                    sources: vec![source],
+                    output_path: output.clone(),
+                    overwrite: true,
+                    options: standard_options()
+                },
+                || false,
+                |_, _, _| {}
+            )
+            .is_err());
+            assert_eq!(fs::read(&output).unwrap(), b"original");
+            assert_eq!(
+                fs::read_dir(temp.path())
+                    .unwrap()
+                    .filter(|entry| entry
+                        .as_ref()
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("partial"))
+                    .count(),
+                0
+            );
+        }
+    }
+
     #[test]
     fn create_cancellation_is_atomic_and_preserves_an_existing_output() {
         // BE-P2-CREATE-CANCEL-ATOMIC
@@ -3612,6 +3745,49 @@ mod tests {
     }
 
     #[test]
+    fn extraction_cancellation_removes_new_files_and_restores_overwritten_files() {
+        let temp = tempdir().unwrap();
+        let archive_path = temp.path().join("cancel.pna");
+        write_archive(
+            &archive_path,
+            &[
+                ("new.txt", b"new"),
+                ("existing.txt", b"replacement"),
+                ("pending.txt", b"pending"),
+            ],
+            None,
+        );
+        let destination = temp.path().join("restore");
+        let root = destination.join("cancel");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("existing.txt"), b"original").unwrap();
+        let cancelled = AtomicBool::new(false);
+        let error = extract_archive(
+            &ExtractRequest {
+                archive_path,
+                destination,
+                entries: vec![],
+                password: None,
+                conflict: ConflictPolicy::Overwrite,
+                restore_permissions: true,
+                keep_completed_on_cancel: false,
+            },
+            || cancelled.load(Ordering::Acquire),
+            |completed, _, _| {
+                if completed == 2 {
+                    cancelled.store(true, Ordering::Release);
+                }
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(fs::read(root.join("existing.txt")).unwrap(), b"original");
+        assert!(!root.join("new.txt").exists());
+        assert!(!root.join("pending.txt").exists());
+        assert_eq!(fs::read_dir(root).unwrap().count(), 1);
+    }
+
+    #[test]
     fn extraction_cancellation_keeps_completed_outputs_when_requested() {
         // BE-P2-EXTRACT-CANCEL-KEEP-COMPLETED
         let temp = tempdir().unwrap();
@@ -3663,13 +3839,17 @@ mod tests {
         // BE-P2-EXTRACT-PERMISSIONS
         use std::os::unix::fs::PermissionsExt;
         let temp = tempdir().unwrap();
-        let source = temp.path().join("script.sh");
-        fs::write(&source, b"#!/bin/sh\n").unwrap();
-        fs::set_permissions(&source, fs::Permissions::from_mode(0o751)).unwrap();
+        let source = temp.path().join("private");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        let script = source.join("nested/script.sh");
+        fs::write(&script, b"#!/bin/sh\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o751)).unwrap();
+        fs::set_permissions(source.join("nested"), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o500)).unwrap();
         let archive_path = temp.path().join("permissions.pna");
         create_archive(
             &CreateRequest {
-                sources: vec![source],
+                sources: vec![source.clone()],
                 output_path: archive_path.clone(),
                 overwrite: false,
                 options: standard_options(),
@@ -3694,12 +3874,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            fs::metadata(destination.join("permissions/script.sh"))
+            fs::metadata(destination.join("permissions/private/nested/script.sh"))
                 .unwrap()
                 .permissions()
                 .mode()
                 & 0o777,
             0o751
         );
+        for (path, mode) in [("private", 0o500), ("private/nested", 0o700)] {
+            assert_eq!(
+                fs::metadata(destination.join("permissions").join(path))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                mode
+            );
+        }
+        fs::set_permissions(source, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            destination.join("permissions/private"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
     }
 }
