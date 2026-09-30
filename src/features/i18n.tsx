@@ -115,7 +115,9 @@ const ENGLISH = {
   noSources: "No files or folders selected.",
   next: "Next",
   confirmPassword: "Confirm password",
-  preservePermissions: "Preserve permissions",
+  preservePermissions: "Preserve Unix permissions",
+  createPreservationScope:
+    "Stores file contents and folder structure. The permission option also stores Unix access permissions on macOS and Linux. Original timestamps, ownership, and extended attributes are excluded; symbolic links are unsupported.",
   reviewCreate: "Review archive creation",
   preset: "Preset",
   allowOverwrite: "Replace an existing archive at the selected path",
@@ -130,7 +132,6 @@ const ENGLISH = {
   startingCreation: "Starting…",
   queued: "Queued",
   preset_standard: "Standard",
-  preset_backup: "Backup",
   preset_distribution: "Distribution",
   preset_maximum: "Maximum compression",
   preset_fast: "Fast",
@@ -138,8 +139,6 @@ const ENGLISH = {
   preset_custom: "Custom",
   preset_standard_description:
     "Balanced compression and individual-file access.",
-  preset_backup_description:
-    "Preserves permissions with dependable compression.",
   preset_distribution_description:
     "Straightforward sharing without source permissions.",
   preset_maximum_description:
@@ -599,7 +598,9 @@ const JAPANESE: Record<TranslationKey, string> = {
   noSources: "ファイルまたはフォルダーが選択されていません。",
   next: "次へ",
   confirmPassword: "パスワードの確認",
-  preservePermissions: "権限を保持",
+  preservePermissions: "Unixのアクセス権を保持",
+  createPreservationScope:
+    "ファイル内容とフォルダー構成を保存します。権限の保持を有効にすると、macOS・LinuxではUnixのアクセス権も保存します。元の日時・所有者・拡張属性は保存対象外です。シンボリックリンクには対応していません。",
   reviewCreate: "作成内容の確認",
   preset: "プリセット",
   allowOverwrite: "選択先に既存アーカイブがある場合は置き換える",
@@ -614,14 +615,12 @@ const JAPANESE: Record<TranslationKey, string> = {
   startingCreation: "開始中…",
   queued: "待機中",
   preset_standard: "標準",
-  preset_backup: "バックアップ",
   preset_distribution: "配布",
   preset_maximum: "高圧縮",
   preset_fast: "高速",
   preset_reproducible: "再現可能",
   preset_custom: "カスタム",
   preset_standard_description: "圧縮率と個別ファイルへのアクセスを両立します。",
-  preset_backup_description: "権限を保持し、安定した圧縮で保存します。",
   preset_distribution_description: "元の権限を含めず、共有しやすくします。",
   preset_maximum_description:
     "サイズを最小化しますが、処理に時間がかかります。",

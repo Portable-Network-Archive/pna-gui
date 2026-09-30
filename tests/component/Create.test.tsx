@@ -264,16 +264,16 @@ describe("archive creation wizard", () => {
     expect(
       screen.getByText("Choose how the archive should be created."),
     ).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: /^Backup\b/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Standard\b/ }));
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
-    bridge.save.mockResolvedValue("/output/backup.pna");
+    bridge.save.mockResolvedValue("/output/archive.pna");
     await userEvent.click(
       screen.getByRole("button", { name: "Start creating" }),
     );
     expect(bridge.invoke).toHaveBeenCalledWith("job_start_create", {
       request: expect.objectContaining({
         sources: ["/input.txt"],
-        outputPath: "/output/backup.pna",
+        outputPath: "/output/archive.pna",
       }),
     });
   });
