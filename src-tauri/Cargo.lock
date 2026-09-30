@@ -3267,6 +3267,7 @@ version = "0.1.4"
 dependencies = [
  "chrono",
  "fs2",
+ "hex",
  "libpna",
  "open",
  "serde",
