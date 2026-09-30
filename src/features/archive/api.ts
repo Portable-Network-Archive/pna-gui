@@ -4,6 +4,7 @@ import type {
   ArchiveEntryPage,
   BootstrapSnapshot,
   EntryDetails,
+  EntryKind,
   OpenArchiveResult,
   PreviewDescriptor,
   SortSpec,
@@ -47,6 +48,7 @@ export const archiveApi = {
     parentEntryId: string | undefined,
     cursor: string | undefined,
     sort: SortSpec,
+    kinds?: EntryKind[],
   ) =>
     invoke<ArchiveEntryPage>("archive_children", {
       handle,
@@ -54,7 +56,7 @@ export const archiveApi = {
       cursor,
       limit: 200,
       sort,
-      filter: null,
+      filter: kinds ? { kinds } : null,
     }),
   search: (handle: string, query: string, cursor?: string) =>
     invoke<ArchiveEntryPage>("archive_search", {
