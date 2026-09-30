@@ -90,6 +90,7 @@ import ComparisonView from "./features/comparison/ComparisonView";
 import VerificationDialog from "./features/verification/VerificationDialog";
 import VerificationResultsDialog from "./features/verification/VerificationResultsDialog";
 import UpdateDialog from "./features/updates/UpdateDialog";
+import { useArchiveEditSave } from "./features/archive/ArchiveEditSaveChoice";
 
 registerE2eBridge();
 
@@ -918,6 +919,8 @@ function BrowserView({
   const [appendOpen, setAppendOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const renameSave = useArchiveEditSave(archive.summary.path);
+  const deleteSave = useArchiveEditSave(archive.summary.path);
   const [renameValue, setRenameValue] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const editPasswordRequired =
@@ -925,6 +928,9 @@ function BrowserView({
     archive.summary.encryptionMethods.some(
       (method) => method.toLowerCase() !== "none",
     );
+  const renamePasswordRequired = archive.summary.encryptionMethods.some(
+    (method) => method.toLowerCase() !== "none",
+  );
   const renameValidationError = !renameValue.trim()
     ? t("renameNameRequired")
     : renameValue.includes("/") || renameValue.includes("\\")
@@ -968,6 +974,7 @@ function BrowserView({
         captureDialogFocus();
         setEditError(undefined);
         setRenameValue(details.entry.name);
+        setEditPassword(sessionPassword ?? "");
         setRenameOpen(true);
       } else if (event.key === "Delete") {
         event.preventDefault();
@@ -978,7 +985,7 @@ function BrowserView({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [details]);
+  }, [details, sessionPassword]);
 
   const loadTreeChildren = useCallback(
     async (parentId?: string, cursor?: string) => {
@@ -1205,6 +1212,7 @@ function BrowserView({
                 captureDialogFocus(moreButtonRef.current);
                 setEditError(undefined);
                 setRenameValue(details?.entry.name ?? "");
+                setEditPassword(sessionPassword ?? "");
                 setRenameOpen(true);
               }}
             >
@@ -1560,7 +1568,7 @@ function BrowserView({
                 onChange={(event) => setRenameValue(event.target.value)}
               />
             </label>
-            {editPasswordRequired && (
+            {renamePasswordRequired && (
               <label>
                 {t("password")}
                 <input
@@ -1570,6 +1578,7 @@ function BrowserView({
                 />
               </label>
             )}
+            {renameSave.choice}
             {renameValidationError && (
               <p
                 className={styles.fieldError}
@@ -1594,18 +1603,21 @@ function BrowserView({
                 !details ||
                 Boolean(renameValidationError) ||
                 editSubmitting ||
-                (editPasswordRequired && !editPassword)
+                (renamePasswordRequired && !editPassword)
               }
               aria-busy={editSubmitting}
               onClick={async () => {
                 if (!details) return;
                 setEditSubmitting(true);
                 try {
+                  const outputPath = await renameSave.chooseOutput();
+                  if (outputPath === undefined) return;
                   const parent = details.entry.path
                     .split("/")
                     .slice(0, -1)
                     .join("/");
                   await jobApi.startRename({
+                    outputPath,
                     archivePath: archive.summary.path,
                     sourcePath: details.entry.path,
                     destinationPath: parent
@@ -1661,6 +1673,7 @@ function BrowserView({
               />
             </label>
           )}
+          {deleteSave.choice}
           {editError && <FormError error={editError} />}
           <Flex mt="5" gap="3" justify="end">
             <AlertDialog.Cancel>
@@ -1682,7 +1695,10 @@ function BrowserView({
                   if (!details) return;
                   setEditSubmitting(true);
                   try {
+                    const outputPath = await deleteSave.chooseOutput();
+                    if (outputPath === undefined) return;
                     await jobApi.startDelete({
+                      outputPath,
                       archivePath: archive.summary.path,
                       entries: [details.entry.path],
                       password: editPassword || null,
@@ -2047,6 +2063,7 @@ function AppendDialog({
   onCloseAutoFocus?: (event: Event) => void;
 }) {
   const { t } = useI18n();
+  const editSave = useArchiveEditSave(archive.summary.path);
   const [sources, setSources] = useState<string[]>([]);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -2094,7 +2111,10 @@ function AppendDialog({
     setSubmitError(undefined);
     setSubmitting(true);
     try {
+      const outputPath = await editSave.chooseOutput();
+      if (outputPath === undefined) return;
       await jobApi.startAppend({
+        outputPath,
         archivePath: archive.summary.path,
         sources,
         options: {
@@ -2157,6 +2177,7 @@ function AppendDialog({
               />
             </label>
           )}
+          {editSave.choice}
           {submitError && <FormError error={submitError} />}
         </div>
         <Flex mt="5" gap="3" justify="end">

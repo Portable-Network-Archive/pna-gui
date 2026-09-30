@@ -68,6 +68,8 @@ pub struct CreateRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AppendRequest {
     pub archive_path: PathBuf,
+    #[serde(default)]
+    pub output_path: Option<PathBuf>,
     pub sources: Vec<PathBuf>,
     pub options: CreateOptions,
 }
@@ -76,6 +78,8 @@ pub struct AppendRequest {
 #[serde(rename_all = "camelCase")]
 pub struct DeleteEntriesRequest {
     pub archive_path: PathBuf,
+    #[serde(default)]
+    pub output_path: Option<PathBuf>,
     pub entries: Vec<PathBuf>,
     pub password: Option<String>,
 }
@@ -84,6 +88,8 @@ pub struct DeleteEntriesRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RenameEntryRequest {
     pub archive_path: PathBuf,
+    #[serde(default)]
+    pub output_path: Option<PathBuf>,
     pub source_path: PathBuf,
     pub destination_path: PathBuf,
     pub password: Option<String>,
@@ -621,6 +627,7 @@ where
         ));
     }
 
+    let output_path = edit_output_path(&request.archive_path, request.output_path.as_deref())?;
     let initial = FileFingerprint::read(&request.archive_path)?;
     let additions = scan_sources(&request.sources)?;
     let mut existing_names = HashSet::new();
@@ -644,7 +651,7 @@ where
         }
     }
 
-    let partial = unique_sibling_path(&request.archive_path, "partial")?;
+    let partial = prepare_separate_partial(output_path)?;
     let mut partial_guard = PartialFile::new(partial.clone());
     let output = OpenOptions::new()
         .write(true)
@@ -691,10 +698,10 @@ where
             "the archive changed while it was being updated; no changes were committed",
         ));
     }
-    let warnings = commit_output(&partial, &request.archive_path, true)?;
+    let warnings = commit_edit_output(&partial, output_path, request.output_path.is_some())?;
     partial_guard.commit();
     Ok(OperationOutcome {
-        output_path: request.archive_path.clone(),
+        output_path: output_path.to_path_buf(),
         completed_items: total,
         warnings,
     })
@@ -750,6 +757,7 @@ where
         .collect::<io::Result<Vec<_>>>()?;
     let (outcome, changed) = transform_archive(
         &request.archive_path,
+        request.output_path.as_deref(),
         request.password.as_deref(),
         cancelled,
         progress,
@@ -789,6 +797,7 @@ where
     }
     let (outcome, changed) = transform_archive(
         &request.archive_path,
+        request.output_path.as_deref(),
         request.password.as_deref(),
         cancelled,
         progress,
@@ -801,7 +810,12 @@ where
                 } else {
                     destination.join(suffix)
                 };
-                Ok(Some(entry.with_name(EntryName::from_lossy(renamed))))
+                Ok(Some(rename_entry(
+                    entry,
+                    EntryName::try_from(renamed.as_path())
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
+                    request.password.as_deref(),
+                )?))
             } else {
                 Ok(Some(entry))
             }
@@ -816,8 +830,47 @@ where
     Ok(outcome)
 }
 
+fn rename_entry(
+    entry: NormalEntry,
+    name: EntryName,
+    password: Option<&str>,
+) -> io::Result<NormalEntry> {
+    match entry.try_with_name(name.clone()) {
+        Ok(entry) => Ok(entry),
+        Err(entry) => {
+            if entry.header().data_kind() != libpna::DataKind::File {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "this encrypted entry kind cannot be renamed",
+                ));
+            }
+            let password = password.filter(|value| !value.is_empty()).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "a password is required to rename this encrypted entry",
+                )
+            })?;
+            let mut options = WriteOptions::builder();
+            options
+                .compression(entry.header().compression())
+                .encryption(entry.header().encryption())
+                .cipher_mode(entry.header().cipher_mode())
+                .password(Some(password));
+            let mut builder = EntryBuilder::new_file(name, options.build())?;
+            builder.metadata(entry.metadata().clone());
+            for chunk in entry.extra_chunks() {
+                builder.add_extra_chunk(chunk.clone());
+            }
+            let mut reader = entry.reader(libpna::ReadOptions::with_password(Some(password)))?;
+            io::copy(&mut reader, &mut builder)?;
+            builder.build()
+        }
+    }
+}
+
 fn transform_archive<C, P, F>(
     archive_path: &Path,
+    separate_output: Option<&Path>,
     password: Option<&str>,
     cancelled: C,
     mut progress: P,
@@ -828,6 +881,7 @@ where
     P: FnMut(u64, u64, &str),
     F: FnMut(NormalEntry) -> io::Result<Option<NormalEntry>>,
 {
+    let output_path = edit_output_path(archive_path, separate_output)?;
     let initial = FileFingerprint::read(archive_path)?;
     let file = fs::File::open(archive_path)?;
     let mut source = Archive::read_header(file)?;
@@ -843,7 +897,7 @@ where
                 .try_fold(total, |count, entry| entry.map(|_| count + 1)),
         }
     })?;
-    let partial = unique_sibling_path(archive_path, "partial")?;
+    let partial = prepare_separate_partial(output_path)?;
     let mut partial_guard = PartialFile::new(partial.clone());
     let output = OpenOptions::new()
         .write(true)
@@ -927,7 +981,7 @@ where
     if changed == 0 {
         return Ok((
             OperationOutcome {
-                output_path: archive_path.to_path_buf(),
+                output_path: output_path.to_path_buf(),
                 completed_items: completed,
                 warnings: Vec::new(),
             },
@@ -943,11 +997,11 @@ where
             "the archive changed while it was being edited; no changes were committed",
         ));
     }
-    let warnings = commit_output(&partial, archive_path, true)?;
+    let warnings = commit_edit_output(&partial, output_path, separate_output.is_some())?;
     partial_guard.commit();
     Ok((
         OperationOutcome {
-            output_path: archive_path.to_path_buf(),
+            output_path: output_path.to_path_buf(),
             completed_items: completed,
             warnings,
         },
@@ -1587,6 +1641,29 @@ where
     })
 }
 
+fn commit_edit_output(
+    partial: &Path,
+    output: &Path,
+    separate: bool,
+) -> io::Result<Vec<OperationWarning>> {
+    if separate {
+        publish_new_output(partial, output)?;
+        Ok(Vec::new())
+    } else {
+        commit_output(partial, output, true)
+    }
+}
+
+fn edit_output_path<'a>(source: &'a Path, output: Option<&'a Path>) -> io::Result<&'a Path> {
+    match output {
+        Some(output) => {
+            validate_separate_output(source, output)?;
+            Ok(output)
+        }
+        None => Ok(source),
+    }
+}
+
 fn validate_separate_output(source: &Path, output: &Path) -> io::Result<()> {
     if source == output {
         return Err(io::Error::new(
@@ -1967,6 +2044,7 @@ mod tests {
 
         let outcome = append_archive(
             &AppendRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 sources: vec![source],
                 options: standard_options(),
@@ -2004,6 +2082,136 @@ mod tests {
     }
 
     #[test]
+    fn edited_copies_preserve_sources_and_reject_conflicting_or_cancelled_outputs() {
+        for (solid, encrypted) in [(false, false), (false, true), (true, true)] {
+            for operation in ["append", "rename", "delete"] {
+                let temp = tempdir().unwrap();
+                let source = temp.path().join("source.pna");
+                let output = temp.path().join("edited.pna");
+                let entries: &[(&str, &[u8])] =
+                    &[("docs/readme.txt", b"readme"), ("keep.txt", b"keep")];
+                let password = encrypted.then_some("secret");
+                if solid {
+                    write_solid_archive(&source, entries, "secret");
+                } else {
+                    write_archive(&source, entries, password);
+                }
+                let original = fs::read(&source).unwrap();
+                let addition = temp.path().join("new.txt");
+                fs::write(&addition, b"new").unwrap();
+                let run = |target: &Path, cancel: bool| match operation {
+                    "append" => {
+                        let mut options = standard_options();
+                        options.solid = solid;
+                        options.encryption = if encrypted {
+                            CreateEncryption::Aes
+                        } else {
+                            CreateEncryption::None
+                        };
+                        options.password = password.map(str::to_string);
+                        append_archive(
+                            &AppendRequest {
+                                archive_path: source.clone(),
+                                output_path: Some(target.to_path_buf()),
+                                sources: vec![addition.clone()],
+                                options,
+                            },
+                            || cancel,
+                            |_, _, _| {},
+                        )
+                    }
+                    "rename" => rename_archive_entry(
+                        &RenameEntryRequest {
+                            archive_path: source.clone(),
+                            output_path: Some(target.to_path_buf()),
+                            source_path: "docs".into(),
+                            destination_path: "manual".into(),
+                            password: password.map(str::to_string),
+                        },
+                        || cancel,
+                        |_, _, _| {},
+                    ),
+                    _ => delete_archive_entries(
+                        &DeleteEntriesRequest {
+                            archive_path: source.clone(),
+                            output_path: Some(target.to_path_buf()),
+                            entries: vec!["docs".into()],
+                            password: password.map(str::to_string),
+                        },
+                        || cancel,
+                        |_, _, _| {},
+                    ),
+                };
+                let outcome = run(&output, false).unwrap();
+                assert_eq!(outcome.output_path, output);
+                assert_eq!(fs::read(&source).unwrap(), original);
+                let expected = match operation {
+                    "append" => vec!["docs/readme.txt", "keep.txt", "new.txt"],
+                    "rename" => vec!["keep.txt", "manual/readme.txt"],
+                    _ => vec!["keep.txt"],
+                };
+                assert_eq!(archive_names(&output, password), expected);
+                // Read the copied payloads, including encrypted solid entries.
+                let mut archive = Archive::read_header(fs::File::open(&output).unwrap()).unwrap();
+                for entry in archive.entries_with_options(&libpna::ReadOptions::with_password(
+                    password.map(str::as_bytes),
+                )) {
+                    let entry = entry.unwrap();
+                    let mut bytes = Vec::new();
+                    entry
+                        .reader(libpna::ReadOptions::with_password(password))
+                        .unwrap()
+                        .read_to_end(&mut bytes)
+                        .unwrap();
+                    let expected = if entry.name().to_string().ends_with("readme.txt") {
+                        b"readme".as_slice()
+                    } else if entry.name().to_string() == "new.txt" {
+                        b"new".as_slice()
+                    } else {
+                        b"keep".as_slice()
+                    };
+                    assert_eq!(bytes, expected);
+                }
+                if encrypted && !solid && operation == "rename" {
+                    for password in [None, Some("wrong".to_string())] {
+                        let rejected = temp.path().join("rejected.pna");
+                        assert!(rename_archive_entry(
+                            &RenameEntryRequest {
+                                archive_path: source.clone(),
+                                output_path: Some(rejected.clone()),
+                                source_path: "docs".into(),
+                                destination_path: "renamed".into(),
+                                password,
+                            },
+                            || false,
+                            |_, _, _| {}
+                        )
+                        .is_err());
+                        assert!(!rejected.exists());
+                        assert_eq!(fs::read(&source).unwrap(), original);
+                    }
+                }
+                let saved = fs::read(&output).unwrap();
+                assert_eq!(
+                    run(&output, false).unwrap_err().kind(),
+                    io::ErrorKind::AlreadyExists
+                );
+                assert_eq!(fs::read(&output).unwrap(), saved);
+                assert!(run(&source, false).is_err());
+                let cancelled = temp.path().join("cancelled.pna");
+                assert!(run(&cancelled, true).is_err());
+                assert!(!cancelled.exists());
+                assert_eq!(fs::read(&source).unwrap(), original);
+                assert!(!fs::read_dir(temp.path()).unwrap().any(|entry| entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".partial-")));
+            }
+        }
+    }
+
+    #[test]
     fn rename_moves_a_directory_tree_without_touching_unrelated_entries() {
         // BE-UPDATE-RENAME-TREE
         let temp = tempdir().unwrap();
@@ -2020,6 +2228,7 @@ mod tests {
 
         rename_archive_entry(
             &RenameEntryRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 source_path: "docs".into(),
                 destination_path: "manual".into(),
@@ -2053,6 +2262,7 @@ mod tests {
 
         delete_archive_entries(
             &DeleteEntriesRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 entries: vec!["remove".into()],
                 password: None,
@@ -2080,6 +2290,7 @@ mod tests {
 
         let error = delete_archive_entries(
             &DeleteEntriesRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 entries: vec!["remove.txt".into()],
                 password: None,
@@ -2681,6 +2892,7 @@ mod tests {
         let original = fs::read(&archive_path).unwrap();
         let duplicate = append_archive(
             &AppendRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 sources: vec![source.clone()],
                 options: standard_options(),
@@ -2697,6 +2909,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let cancelled = append_archive(
             &AppendRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 sources: vec![different],
                 options: standard_options(),
@@ -2724,6 +2937,7 @@ mod tests {
 
         let error = delete_archive_entries(
             &DeleteEntriesRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 entries: vec![PathBuf::from("first.txt")],
                 password: None,
@@ -2755,6 +2969,7 @@ mod tests {
 
         let error = append_archive(
             &AppendRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 sources: vec![source],
                 options: standard_options(),
@@ -2787,6 +3002,7 @@ mod tests {
         options.password = Some("secret".into());
         append_archive(
             &AppendRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 sources: vec![added],
                 options,
@@ -2803,6 +3019,7 @@ mod tests {
 
         rename_archive_entry(
             &RenameEntryRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 source_path: "secret".into(),
                 destination_path: "private".into(),
@@ -2827,6 +3044,7 @@ mod tests {
         let original = fs::read(&archive_path).unwrap();
         let missing = delete_archive_entries(
             &DeleteEntriesRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 entries: vec!["missing".into()],
                 password: None,
@@ -2838,6 +3056,7 @@ mod tests {
         assert_eq!(missing.kind(), io::ErrorKind::NotFound);
         let collision = rename_archive_entry(
             &RenameEntryRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 source_path: "a.txt".into(),
                 destination_path: "b.txt".into(),
@@ -2864,6 +3083,7 @@ mod tests {
         let edit_progress = std::sync::Mutex::new(Vec::new());
         rename_archive_entry(
             &RenameEntryRequest {
+                output_path: None,
                 archive_path: archive_path.clone(),
                 source_path: "a.txt".into(),
                 destination_path: "renamed.txt".into(),

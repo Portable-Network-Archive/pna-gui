@@ -1,0 +1,34 @@
+.choice {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 12px;
+}
+
+.choice label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.choice select {
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 5px;
+  color: var(--app-text);
+  background: white;
+}
+
+.choice select:focus-visible {
+  outline: 2px solid var(--app-blue);
+  outline-offset: 1px;
+}
+
+.choice p {
+  margin: 0;
+}
+
+.choice small {
+  overflow-wrap: anywhere;
+}

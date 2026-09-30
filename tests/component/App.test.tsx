@@ -618,6 +618,7 @@ describe("application shell", () => {
   });
 
   it("[UI-UPDATE-APPEND-FLOW] adds selected files to the open archive as a background job", async () => {
+    bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
     await openRecentArchive();
     bridge.openDialog.mockResolvedValueOnce(["/tmp/new.txt"]);
 
@@ -626,6 +627,18 @@ describe("application shell", () => {
       await screen.findByRole("dialog", { name: "Add to archive" }),
     ).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Choose files" }));
+    bridge.saveDialog.mockResolvedValueOnce(null);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add to Archive" }),
+    );
+    expect(
+      bridge.invoke.mock.calls.some(
+        ([command]) => command === "job_start_append",
+      ),
+    ).toBe(false);
+    expect(
+      screen.getByRole("dialog", { name: "Add to archive" }),
+    ).toBeVisible();
     await userEvent.click(
       screen.getByRole("button", { name: "Add to Archive" }),
     );
@@ -633,6 +646,7 @@ describe("application shell", () => {
     expect(bridge.invoke).toHaveBeenCalledWith("job_start_append", {
       request: {
         archivePath: recent.path,
+        outputPath: "/tmp/demo-edited.pna",
         sources: ["/tmp/new.txt"],
         options: {
           solid: false,
@@ -647,6 +661,7 @@ describe("application shell", () => {
   });
 
   it("[UI-PICKER-APPEND-ERROR] reports a file picker failure inside the append dialog", async () => {
+    bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
     await openRecentArchive();
     bridge.openDialog.mockRejectedValueOnce(
       new Error("file picker unavailable"),
@@ -669,6 +684,7 @@ describe("application shell", () => {
   });
 
   it("[UI-UPDATE-APPEND-ERROR-RECOVERY] retains selected sources when job submission fails", async () => {
+    bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
     await openRecentArchive();
     bridge.openDialog.mockResolvedValueOnce(["/tmp/new.txt"]);
     await userEvent.click(screen.getByRole("button", { name: "Add files" }));
@@ -694,6 +710,7 @@ describe("application shell", () => {
   });
 
   it("[UI-UPDATE-RENAME-FLOW] names the selected entry and keeps invalid input in place", async () => {
+    bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
     await openRecentArchive();
     await userEvent.click(
       await screen.findByRole("row", { name: /src Folder/ }),
@@ -707,6 +724,7 @@ describe("application shell", () => {
     expect(bridge.invoke).toHaveBeenCalledWith("job_start_rename_entry", {
       request: {
         archivePath: recent.path,
+        outputPath: "/tmp/demo-edited.pna",
         sourcePath: "src",
         destinationPath: "manual",
         password: null,
@@ -715,6 +733,7 @@ describe("application shell", () => {
   });
 
   it("[UI-UPDATE-RENAME-ENCRYPTED] requires, forwards, and clears the encrypted solid archive password", async () => {
+    bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
     const encryptedSummary: ArchiveSummary = {
       ...summary,
       solid: true,
@@ -748,6 +767,7 @@ describe("application shell", () => {
     expect(bridge.invoke).toHaveBeenCalledWith("job_start_rename_entry", {
       request: {
         archivePath: recent.path,
+        outputPath: "/tmp/demo-edited.pna",
         sourcePath: "src",
         destinationPath: "src",
         password: "secret",
@@ -764,6 +784,7 @@ describe("application shell", () => {
   });
 
   it("[UI-UX-RENAME-VALIDATION] distinguishes an empty name from a path separator", async () => {
+    bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
     await openRecentArchive();
     await userEvent.click(
       await screen.findByRole("row", { name: /src Folder/ }),
@@ -793,6 +814,7 @@ describe("application shell", () => {
   });
 
   it("[UI-UPDATE-DELETE-CONFIRMATION] confirms the exact selected archive path", async () => {
+    bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
     await openRecentArchive();
     await userEvent.click(
       await screen.findByRole("row", { name: /src Folder/ }),
@@ -803,12 +825,17 @@ describe("application shell", () => {
       name: "Delete from archive?",
     });
     expect(within(dialog).getByText("src")).toBeVisible();
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText("Save edited archive"),
+      "overwrite",
+    );
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Delete from Archive" }),
     );
     expect(bridge.invoke).toHaveBeenCalledWith("job_start_delete_entries", {
       request: {
         archivePath: recent.path,
+        outputPath: null,
         entries: ["src"],
         password: null,
       },
@@ -816,6 +843,7 @@ describe("application shell", () => {
   });
 
   it("[UI-UPDATE-DELETE-ERROR-RECOVERY] keeps the destructive scope visible when job submission fails", async () => {
+    bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
     await openRecentArchive();
     await userEvent.click(
       await screen.findByRole("row", { name: /src Folder/ }),
