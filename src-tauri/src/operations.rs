@@ -1641,9 +1641,9 @@ fn scan_source(
     result: &mut Vec<ScannedEntry>,
     names: &mut HashSet<PathBuf>,
 ) -> io::Result<()> {
-    super::safe_relative_entry_path(&archive_path)?;
-    EntryName::try_from(archive_path.as_path())
+    let name = EntryName::try_from(archive_path.as_path())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    super::safe_relative_entry_path(name.as_path())?;
     if !names.insert(archive_path.clone()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -3331,7 +3331,11 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
         let temp = tempdir().unwrap();
         let output = temp.path().join("output.pna");
-        let mut names = vec![OsString::from("report:2026.txt"), OsString::from("NUL.txt")];
+        let mut names = vec![
+            OsString::from("report:2026.txt"),
+            OsString::from("NUL.txt"),
+            OsString::from("literal\\backslash.txt"),
+        ];
         if cfg!(target_os = "linux") {
             names.push(OsString::from_vec(b"invalid-\xff.txt".to_vec()));
         }
@@ -3586,10 +3590,10 @@ mod tests {
         let mut archive = Archive::read_header(fs::File::open(output).unwrap()).unwrap();
         let names = archive
             .entries_with_options(&libpna::ReadOptions::with_password(None::<&[u8]>))
-            .map(|entry| entry.unwrap().header().path().as_path().to_path_buf())
+            .map(|entry| entry.unwrap().name().to_string())
             .collect::<Vec<_>>();
-        assert!(names.contains(&PathBuf::from("single.txt")));
-        assert!(names.contains(&PathBuf::from("folder/nested.txt")));
+        assert!(names.contains(&"single.txt".to_string()));
+        assert!(names.contains(&"folder/nested.txt".to_string()));
     }
 
     #[test]
