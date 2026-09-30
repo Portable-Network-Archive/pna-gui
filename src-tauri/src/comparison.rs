@@ -910,7 +910,7 @@ mod tests {
             xattrs: Some(Vec::new()),
             compression: Some("No".into()),
             encryption: Some("No".into()),
-            content_sha256: Some(format!("{:x}", Sha256::digest(b"same"))),
+            content_sha256: Some(hex_bytes(Sha256::digest(b"same"))),
         }
     }
 
