@@ -13,13 +13,7 @@ const COMPRESSION = ["store", "deflate", "zstd", "xz"] as const;
 type Compression = (typeof COMPRESSION)[number];
 const ENCRYPTION = ["none", "aes", "camellia"] as const;
 type Encryption = (typeof ENCRYPTION)[number];
-type Preset =
-  | "standard"
-  | "backup"
-  | "distribution"
-  | "maximum"
-  | "fast"
-  | "reproducible";
+type Preset = "standard" | "distribution" | "maximum" | "fast" | "reproducible";
 type PresetSelection = Preset | "custom";
 
 interface Settings {
@@ -32,13 +26,6 @@ interface Settings {
 
 const PRESETS: Record<Preset, Settings> = {
   standard: {
-    compression: "zstd",
-    encryption: "none",
-    solid: false,
-    preservePermissions: true,
-    reproducible: false,
-  },
-  backup: {
     compression: "zstd",
     encryption: "none",
     solid: false,
@@ -308,7 +295,6 @@ export default function Create() {
             {(
               [
                 "standard",
-                "backup",
                 "distribution",
                 "maximum",
                 "fast",
@@ -441,6 +427,7 @@ export default function Create() {
               {t("preservePermissions")}
             </label>
           </div>
+          <p className={styles.hint}>{t("createPreservationScope")}</p>
           {validation && (
             <p
               id="create-validation"
@@ -491,6 +478,7 @@ export default function Create() {
             {t("allowOverwrite")}
           </label>
           <p className={styles.hint}>{t("estimatedNotGuaranteed")}</p>
+          <p className={styles.hint}>{t("createPreservationScope")}</p>
           {validation && (
             <p
               id="create-validation"
