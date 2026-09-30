@@ -6,6 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::utils::encode_hex;
 use libpna::{Archive, Chunk, DataKind, ReadOptions};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -410,7 +411,7 @@ fn folder_content_digest(items: &BTreeMap<String, ComparisonItem>) -> String {
             digest.update(hash.as_bytes());
         }
     }
-    hex_bytes(digest.finalize())
+    encode_hex(digest.finalize())
 }
 
 fn sha256_file_with_cancel(path: &PathBuf, cancelled: &impl Fn() -> bool) -> io::Result<String> {
@@ -425,15 +426,7 @@ fn sha256_file_with_cancel(path: &PathBuf, cancelled: &impl Fn() -> bool) -> io:
         }
         digest.update(&buffer[..read]);
     }
-    Ok(hex_bytes(digest.finalize()))
-}
-
-fn hex_bytes(bytes: impl AsRef<[u8]>) -> String {
-    bytes
-        .as_ref()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    Ok(encode_hex(digest.finalize()))
 }
 
 #[cfg(unix)]
@@ -537,7 +530,7 @@ where
                     ));
                 }
             }
-            Some(hex_bytes(digest))
+            Some(encode_hex(digest))
         } else {
             None
         };
@@ -562,7 +555,7 @@ where
                         format!(
                             "{}:{}",
                             attribute.name(),
-                            hex_bytes(Sha256::digest(attribute.value()))
+                            encode_hex(Sha256::digest(attribute.value()))
                         )
                     })
                     .collect(),
@@ -639,7 +632,7 @@ fn archive_stamp(source: &CompareSource) -> io::Result<ComparisonSourceStamp> {
             .modified()
             .ok()
             .and_then(system_time_to_unix_seconds),
-        sha256: hex_bytes(digest.finalize()),
+        sha256: encode_hex(digest.finalize()),
     })
 }
 
@@ -894,7 +887,7 @@ mod tests {
     }
 
     fn file_sha256(path: &Path) -> String {
-        hex_bytes(Sha256::digest(fs::read(path).unwrap()))
+        encode_hex(Sha256::digest(fs::read(path).unwrap()))
     }
 
     fn sample_file_item() -> ComparisonItem {
@@ -910,7 +903,7 @@ mod tests {
             xattrs: Some(Vec::new()),
             compression: Some("No".into()),
             encryption: Some("No".into()),
-            content_sha256: Some(hex_bytes(Sha256::digest(b"same"))),
+            content_sha256: Some(encode_hex(Sha256::digest(b"same"))),
         }
     }
 
@@ -1187,7 +1180,7 @@ mod tests {
                 xattrs: None,
                 compression: Some("No".into()),
                 encryption: Some("No".into()),
-                content_sha256: Some(hex_bytes(Sha256::digest(b"content"))),
+                content_sha256: Some(encode_hex(Sha256::digest(b"content"))),
             },
         )]);
         let first = folder_content_digest(&before);

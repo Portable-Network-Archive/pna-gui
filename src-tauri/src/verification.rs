@@ -5,6 +5,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::utils::encode_hex;
 use libpna::{Archive, Chunk, ChunkType, DataKind, Encryption, ReadEntry, ReadOptions, PNA_HEADER};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -779,11 +780,7 @@ fn sha256_file_with_cancel(
         }
         digest.update(&buffer[..read]);
     }
-    Ok(digest
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    Ok(encode_hex(digest.finalize()))
 }
 
 fn now_seconds() -> i64 {

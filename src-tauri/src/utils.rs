@@ -2,6 +2,10 @@ use std::{fs, io, path::Path};
 
 use libpna::{Archive, Encryption, ReadEntry};
 
+pub(crate) fn encode_hex(bytes: impl AsRef<[u8]>) -> String {
+    hex::encode(bytes)
+}
+
 pub(crate) fn is_encrypted<P: AsRef<Path>>(path: P) -> io::Result<bool> {
     let file = fs::File::open(path)?;
     let mut archive = Archive::read_header(file)?;
