@@ -110,9 +110,27 @@ impl JobRequest {
         match self {
             Self::Create(request) => Some(request.output_path.clone()),
             Self::Extract(request) => Some(request.destination.clone()),
-            Self::Append(request) => Some(request.archive_path.clone()),
-            Self::Delete(request) => Some(request.archive_path.clone()),
-            Self::Rename(request) => Some(request.archive_path.clone()),
+            Self::Append(request) => Some(
+                request
+                    .output_path
+                    .as_ref()
+                    .unwrap_or(&request.archive_path)
+                    .clone(),
+            ),
+            Self::Delete(request) => Some(
+                request
+                    .output_path
+                    .as_ref()
+                    .unwrap_or(&request.archive_path)
+                    .clone(),
+            ),
+            Self::Rename(request) => Some(
+                request
+                    .output_path
+                    .as_ref()
+                    .unwrap_or(&request.archive_path)
+                    .clone(),
+            ),
             Self::Split(request) => request
                 .archive_path
                 .file_stem()
@@ -138,9 +156,15 @@ impl JobRequest {
                 ResourceAccess::Read(request.archive_path.clone()),
                 ResourceAccess::WriteTree(request.destination.clone()),
             ],
-            Self::Append(request) => vec![ResourceAccess::Write(request.archive_path.clone())],
-            Self::Delete(request) => vec![ResourceAccess::Write(request.archive_path.clone())],
-            Self::Rename(request) => vec![ResourceAccess::Write(request.archive_path.clone())],
+            Self::Append(request) => {
+                edit_resource_accesses(&request.archive_path, request.output_path.as_deref())
+            }
+            Self::Delete(request) => {
+                edit_resource_accesses(&request.archive_path, request.output_path.as_deref())
+            }
+            Self::Rename(request) => {
+                edit_resource_accesses(&request.archive_path, request.output_path.as_deref())
+            }
             Self::Split(request) => {
                 let mut accesses = vec![ResourceAccess::Read(request.archive_path.clone())];
                 if let Some(output) = self.intended_output() {
@@ -199,6 +223,19 @@ impl JobRequest {
                 ]
             }
         }
+    }
+}
+
+fn edit_resource_accesses(
+    source: &std::path::Path,
+    output: Option<&std::path::Path>,
+) -> Vec<ResourceAccess> {
+    match output {
+        Some(output) => vec![
+            ResourceAccess::Read(source.to_path_buf()),
+            ResourceAccess::Write(output.to_path_buf()),
+        ],
+        None => vec![ResourceAccess::Write(source.to_path_buf())],
     }
 }
 
@@ -1072,6 +1109,11 @@ fn persist_job_records(
 
 fn job_error_code(kind: JobKind, error: &io::Error) -> &'static str {
     let detail = error.to_string().to_lowercase();
+    if error.kind() == io::ErrorKind::AlreadyExists
+        && detail.contains("the output archive already exists")
+    {
+        return "OUTPUT_ALREADY_EXISTS";
+    }
     if kind == JobKind::Compare {
         if detail.contains("source changed") {
             return "SOURCE_CHANGED";
@@ -1132,6 +1174,46 @@ mod tests {
         }
     }
 
+    #[test]
+    fn edited_copy_jobs_track_and_lock_the_destination_without_locking_source_readers() {
+        let source = PathBuf::from("/archives/source.pna");
+        let output = PathBuf::from("/archives/copy.pna");
+        let requests = [
+            JobRequest::Append(AppendRequest {
+                archive_path: source.clone(),
+                output_path: Some(output.clone()),
+                sources: vec!["new.txt".into()],
+                options: sample_create_options(),
+            }),
+            JobRequest::Delete(DeleteEntriesRequest {
+                archive_path: source.clone(),
+                output_path: Some(output.clone()),
+                entries: vec!["old.txt".into()],
+                password: None,
+            }),
+            JobRequest::Rename(RenameEntryRequest {
+                archive_path: source.clone(),
+                output_path: Some(output.clone()),
+                source_path: "old.txt".into(),
+                destination_path: "new.txt".into(),
+                password: None,
+            }),
+        ];
+        for request in requests {
+            assert_eq!(request.intended_output(), Some(output.clone()));
+            let accesses = request.resource_accesses();
+            assert!(accesses
+                .iter()
+                .any(|access| access.conflicts_with(&ResourceAccess::Write(output.clone()))));
+            assert!(accesses
+                .iter()
+                .any(|access| access.conflicts_with(&ResourceAccess::Write(source.clone()))));
+            assert!(!accesses
+                .iter()
+                .any(|access| access.conflicts_with(&ResourceAccess::Read(source.clone()))));
+        }
+    }
+
     fn sample_job_requests() -> Vec<JobRequest> {
         vec![
             JobRequest::Create(CreateRequest {
@@ -1150,16 +1232,19 @@ mod tests {
                 keep_completed_on_cancel: true,
             }),
             JobRequest::Append(AppendRequest {
+                output_path: None,
                 archive_path: PathBuf::from("/archives/append.pna"),
                 sources: vec![PathBuf::from("/sources/new.txt")],
                 options: sample_create_options(),
             }),
             JobRequest::Delete(DeleteEntriesRequest {
+                output_path: None,
                 archive_path: PathBuf::from("/archives/delete.pna"),
                 entries: vec![PathBuf::from("old.txt")],
                 password: None,
             }),
             JobRequest::Rename(RenameEntryRequest {
+                output_path: None,
                 archive_path: PathBuf::from("/archives/rename.pna"),
                 source_path: PathBuf::from("old.txt"),
                 destination_path: PathBuf::from("new.txt"),
@@ -1692,6 +1777,7 @@ mod tests {
         let archive_write = manager
             .start_with_spawner(
                 JobRequest::Append(AppendRequest {
+                    output_path: None,
                     archive_path: archive,
                     sources: vec![PathBuf::from("/sources/new.txt")],
                     options: sample_create_options(),
@@ -1738,6 +1824,7 @@ mod tests {
         manager
             .start_with_spawner(
                 JobRequest::Append(AppendRequest {
+                    output_path: None,
                     archive_path: archive_path.clone(),
                     sources: vec![PathBuf::from("/sources/new.txt")],
                     options: sample_create_options(),
@@ -1750,6 +1837,7 @@ mod tests {
         let conflicting_delete = manager
             .start_with_spawner(
                 JobRequest::Delete(DeleteEntriesRequest {
+                    output_path: None,
                     archive_path,
                     entries: vec![PathBuf::from("old.txt")],
                     password: None,
@@ -1779,6 +1867,7 @@ mod tests {
     fn retry_rejects_an_active_conflict_without_changing_the_failed_job() {
         let manager = JobManager::default();
         let request = JobRequest::Delete(crate::operations::DeleteEntriesRequest {
+            output_path: None,
             archive_path: PathBuf::from("/archives/project.pna"),
             entries: vec![PathBuf::from("entry.txt")],
             password: None,

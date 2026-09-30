@@ -157,6 +157,7 @@ export interface ExtractJobRequest {
 
 export interface AppendJobRequest {
   archivePath: string;
+  outputPath?: string | null;
   sources: string[];
   options: CreateJobRequest["options"];
 }
@@ -223,6 +224,7 @@ export const jobApi = {
     }),
   startDelete: (request: {
     archivePath: string;
+    outputPath?: string | null;
     entries: string[];
     password: string | null;
   }) =>
@@ -231,6 +233,7 @@ export const jobApi = {
     }),
   startRename: (request: {
     archivePath: string;
+    outputPath?: string | null;
     sourcePath: string;
     destinationPath: string;
     password: string | null;

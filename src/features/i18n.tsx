@@ -148,9 +148,20 @@ const ENGLISH = {
     "Repeatable output for unchanged source files.",
   extract: "Extract",
   addFilesToArchive: "Add files",
+  editSaveMode: "Save edited archive",
+  editSourceArchive: "Original archive",
+  editSaveCopy: "Save as a new archive (recommended)",
+  editSaveOverwrite: "Overwrite the current archive",
+  saveEditedArchive: "Save edited archive as",
+  editSaveDifferentPath:
+    "Choose a new filename, or select overwrite to replace the current archive.",
+  editSaveCopyHint:
+    "Choose a new filename next. The source archive stays intact.",
+  editSaveOverwriteHint:
+    "Replaces the archive below after editing completes. This cannot be undone.",
   addToArchive: "Add to archive",
   addToArchiveDescription:
-    "Choose files or folders to add. The original archive is replaced only after the updated archive is complete.",
+    "Choose files or folders to add, then select how to save the edited archive.",
   chooseFiles: "Choose files",
   chooseFolder: "Choose folder",
   selectedSources: "Selected sources",
@@ -628,9 +639,20 @@ const JAPANESE: Record<TranslationKey, string> = {
   preset_reproducible_description: "同じ入力から再現可能な出力を作成します。",
   extract: "展開",
   addFilesToArchive: "ファイルを追加",
+  editSaveMode: "編集結果の保存方法",
+  editSourceArchive: "元アーカイブ",
+  editSaveCopy: "別名で保存（推奨）",
+  editSaveOverwrite: "現在のアーカイブへ上書き保存",
+  saveEditedArchive: "編集結果を別名で保存",
+  editSaveDifferentPath:
+    "新しいファイル名を選択してください。元を置き換える場合は上書き保存を選択してください。",
+  editSaveCopyHint:
+    "次に新しいファイル名を選択します。元アーカイブはそのまま保持します。",
+  editSaveOverwriteHint:
+    "編集が完了してから、下のアーカイブを置き換えます。この操作は取り消せません。",
   addToArchive: "アーカイブへ追加",
   addToArchiveDescription:
-    "追加するファイルまたはフォルダーを選択します。更新版が完成するまで元のアーカイブは置き換えません。",
+    "追加するファイルやフォルダーと、編集結果の保存方法を選択します。",
   chooseFiles: "ファイルを選択",
   chooseFolder: "フォルダーを選択",
   selectedSources: "選択した対象",
