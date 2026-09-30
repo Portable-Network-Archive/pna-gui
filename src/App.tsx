@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  KeyboardEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -905,7 +898,20 @@ function BrowserView({
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectionAnchorRef = useRef<string | undefined>(undefined);
+  const selectedPaths = useMemo(
+    () =>
+      items
+        .filter((entry) => selectedIds.has(entry.id))
+        .map((entry) => entry.path),
+    [items, selectedIds],
+  );
   const [details, setDetails] = useState<EntryDetails>();
+  const renameEntry =
+    selectedPaths.length === 1
+      ? items.find((entry) => selectedIds.has(entry.id))
+      : undefined;
   const [preview, setPreview] = useState<PreviewDescriptor>();
   const [treePages, setTreePages] = useState<TreePages>({});
   const [treeCursors, setTreeCursors] = useState<
@@ -963,17 +969,19 @@ function BrowserView({
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (
-        !details ||
+        selectedPaths.length === 0 ||
+        (event.target instanceof HTMLElement &&
+          event.target.closest('[role="dialog"], [role="alertdialog"]')) ||
         event.target instanceof HTMLInputElement ||
         event.target instanceof HTMLTextAreaElement ||
         event.target instanceof HTMLSelectElement
       )
         return;
-      if (event.key === "F2") {
+      if (event.key === "F2" && renameEntry) {
         event.preventDefault();
         captureDialogFocus();
         setEditError(undefined);
-        setRenameValue(details.entry.name);
+        setRenameValue(renameEntry.name);
         setEditPassword(sessionPassword ?? "");
         setRenameOpen(true);
       } else if (event.key === "Delete") {
@@ -985,7 +993,7 @@ function BrowserView({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [details, sessionPassword]);
+  }, [renameEntry, selectedPaths.length, sessionPassword]);
 
   const loadTreeChildren = useCallback(
     async (parentId?: string, cursor?: string) => {
@@ -1035,6 +1043,8 @@ function BrowserView({
     selectionRequestRef.current += 1;
     setListBusy(true);
     setSelectedId(undefined);
+    setSelectedIds(new Set());
+    selectionAnchorRef.current = undefined;
     setDetails(undefined);
     setPreview(undefined);
     const request = query
@@ -1093,6 +1103,35 @@ function BrowserView({
       if (selectionRequestRef.current === request)
         onError(normalizeAppError(caught));
     }
+  };
+
+  const updateSelection = (
+    entry: ArchiveEntry,
+    toggle = false,
+    range = false,
+  ) => {
+    const anchorIndex = items.findIndex(
+      (item) => item.id === selectionAnchorRef.current,
+    );
+    const entryIndex = items.findIndex((item) => item.id === entry.id);
+    if (range && anchorIndex >= 0) {
+      const rangeIds = items
+        .slice(
+          Math.min(anchorIndex, entryIndex),
+          Math.max(anchorIndex, entryIndex) + 1,
+        )
+        .map((item) => item.id);
+      setSelectedIds(
+        new Set(toggle ? [...selectedIds, ...rangeIds] : rangeIds),
+      );
+    } else {
+      selectionAnchorRef.current = entry.id;
+      const next = toggle ? new Set(selectedIds) : new Set<string>();
+      if (toggle && next.has(entry.id)) next.delete(entry.id);
+      else next.add(entry.id);
+      setSelectedIds(next);
+    }
+    void selectEntry(entry);
   };
 
   const loadMore = async () => {
@@ -1207,11 +1246,11 @@ function BrowserView({
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="start">
             <DropdownMenu.Item
-              disabled={!details}
+              disabled={!renameEntry}
               onSelect={() => {
                 captureDialogFocus(moreButtonRef.current);
                 setEditError(undefined);
-                setRenameValue(details?.entry.name ?? "");
+                setRenameValue(renameEntry?.name ?? "");
                 setEditPassword(sessionPassword ?? "");
                 setRenameOpen(true);
               }}
@@ -1220,7 +1259,7 @@ function BrowserView({
             </DropdownMenu.Item>
             <DropdownMenu.Item
               color="red"
-              disabled={!details}
+              disabled={selectedPaths.length === 0}
               onSelect={() => {
                 captureDialogFocus(moreButtonRef.current);
                 setEditError(undefined);
@@ -1397,6 +1436,28 @@ function BrowserView({
               </button>
             </div>
           )}
+          <div className={styles.selectionToolbar}>
+            <span role="status">
+              {t("selectionCount").replace(
+                "{count}",
+                formatCount(selectedPaths.length, locale),
+              )}
+            </span>
+            <button
+              disabled={listBusy || items.length === 0}
+              onClick={() =>
+                setSelectedIds(new Set(items.map((entry) => entry.id)))
+              }
+            >
+              {t("selectLoadedItems")}
+            </button>
+            <button
+              disabled={selectedPaths.length === 0}
+              onClick={() => setSelectedIds(new Set())}
+            >
+              {t("clearSelection")}
+            </button>
+          </div>
           <div className={styles.listPanel}>
             <table className={styles.table}>
               <thead>
@@ -1436,39 +1497,96 @@ function BrowserView({
                 </tr>
               </thead>
               <tbody>
-                {items.map((entry) => (
+                {items.map((entry, index) => (
                   <tr
                     key={entry.id}
                     data-entry-path={entry.path}
                     className={
-                      selectedId === entry.id ? styles.selectedRow : undefined
+                      selectedIds.has(entry.id) ? styles.selectedRow : undefined
                     }
-                    tabIndex={0}
-                    onClick={() => void selectEntry(entry)}
+                    aria-selected={selectedIds.has(entry.id)}
+                    tabIndex={
+                      selectedId === entry.id || (!selectedId && index === 0)
+                        ? 0
+                        : -1
+                    }
+                    onClick={(event) => {
+                      event.currentTarget.focus();
+                      updateSelection(
+                        entry,
+                        event.ctrlKey || event.metaKey,
+                        event.shiftKey,
+                      );
+                    }}
                     onDoubleClick={() => openEntry(entry)}
-                    onKeyDown={(event) =>
-                      handleEntryKey(event, () => openEntry(entry))
-                    }
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        openEntry(entry);
+                      } else if (event.key === " ") {
+                        event.preventDefault();
+                        updateSelection(entry, true, event.shiftKey);
+                      } else if (
+                        event.key === "ArrowDown" ||
+                        event.key === "ArrowUp"
+                      ) {
+                        event.preventDefault();
+                        const nextIndex = Math.max(
+                          0,
+                          Math.min(
+                            items.length - 1,
+                            index + (event.key === "ArrowDown" ? 1 : -1),
+                          ),
+                        );
+                        const next = items[nextIndex];
+                        (
+                          event.currentTarget.parentElement?.children[
+                            nextIndex
+                          ] as HTMLElement
+                        )?.focus();
+                        if (event.ctrlKey || event.metaKey)
+                          void selectEntry(next);
+                        else updateSelection(next, false, event.shiftKey);
+                      }
+                    }}
                   >
                     <td>
-                      <span className={styles.fileIdentity}>
-                        <span className={styles.fileName}>
-                          {entry.kind === "directory" ? (
-                            <FolderGlyph />
-                          ) : (
-                            <FileIcon />
+                      <div className={styles.selectionCell}>
+                        <input
+                          type="checkbox"
+                          aria-label={t("selectEntry").replace(
+                            "{name}",
+                            entry.path,
                           )}
-                          <span>{entry.name}</span>
+                          checked={selectedIds.has(entry.id)}
+                          tabIndex={-1}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            event.currentTarget.closest("tr")?.focus();
+                          }}
+                          onChange={() => updateSelection(entry, true)}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                        />
+                        <span className={styles.fileIdentity}>
+                          <span className={styles.fileName}>
+                            {entry.kind === "directory" ? (
+                              <FolderGlyph />
+                            ) : (
+                              <FileIcon />
+                            )}
+                            <span>{entry.name}</span>
+                          </span>
+                          {query && (
+                            <small
+                              className={styles.entryLocation}
+                              title={entry.path}
+                            >
+                              {entry.path}
+                            </small>
+                          )}
                         </span>
-                        {query && (
-                          <small
-                            className={styles.entryLocation}
-                            title={entry.path}
-                          >
-                            {entry.path}
-                          </small>
-                        )}
-                      </span>
+                      </div>
                     </td>
                     <td>{kindLabel(entry.kind, t)}</td>
                     <td className={styles.numeric}>
@@ -1520,7 +1638,7 @@ function BrowserView({
       <ExtractDialog
         open={extractOpen}
         archive={archive}
-        selectedPath={details?.entry.path}
+        selectedPaths={selectedPaths}
         onOpenChange={setExtractOpen}
         onCloseAutoFocus={restoreDialogFocus}
       />
@@ -1600,26 +1718,26 @@ function BrowserView({
             </Button>
             <Button
               disabled={
-                !details ||
+                !renameEntry ||
                 Boolean(renameValidationError) ||
                 editSubmitting ||
                 (renamePasswordRequired && !editPassword)
               }
               aria-busy={editSubmitting}
               onClick={async () => {
-                if (!details) return;
+                if (!renameEntry) return;
                 setEditSubmitting(true);
                 try {
                   const outputPath = await renameSave.chooseOutput();
                   if (outputPath === undefined) return;
-                  const parent = details.entry.path
+                  const parent = renameEntry.path
                     .split("/")
                     .slice(0, -1)
                     .join("/");
                   await jobApi.startRename({
                     outputPath,
                     archivePath: archive.summary.path,
-                    sourcePath: details.entry.path,
+                    sourcePath: renameEntry.path,
                     destinationPath: parent
                       ? `${parent}/${renameValue.trim()}`
                       : renameValue.trim(),
@@ -1660,9 +1778,7 @@ function BrowserView({
           <AlertDialog.Description>
             {t("deleteFromArchiveDescription")}
           </AlertDialog.Description>
-          <p>
-            <strong>{details?.entry.path ?? ""}</strong>
-          </p>
+          <ArchiveSelection paths={selectedPaths} />
           {editPasswordRequired && (
             <label className={styles.extractForm}>
               {t("password")}
@@ -1685,14 +1801,14 @@ function BrowserView({
               <Button
                 color="red"
                 disabled={
-                  !details ||
+                  selectedPaths.length === 0 ||
                   editSubmitting ||
                   (editPasswordRequired && !editPassword)
                 }
                 aria-busy={editSubmitting}
                 onClick={async (event) => {
                   event.preventDefault();
-                  if (!details) return;
+                  if (selectedPaths.length === 0) return;
                   setEditSubmitting(true);
                   try {
                     const outputPath = await deleteSave.chooseOutput();
@@ -1700,7 +1816,7 @@ function BrowserView({
                     await jobApi.startDelete({
                       outputPath,
                       archivePath: archive.summary.path,
-                      entries: [details.entry.path],
+                      entries: selectedPaths,
                       password: editPassword || null,
                     });
                     setDeleteOpen(false);
@@ -2208,13 +2324,13 @@ function AppendDialog({
 function ExtractDialog({
   open,
   archive,
-  selectedPath,
+  selectedPaths,
   onOpenChange,
   onCloseAutoFocus,
 }: {
   open: boolean;
   archive: OpenArchiveResult;
-  selectedPath?: string;
+  selectedPaths: string[];
   onOpenChange: (open: boolean) => void;
   onCloseAutoFocus?: (event: Event) => void;
 }) {
@@ -2246,8 +2362,8 @@ function ExtractDialog({
       : t("readyToExtract");
 
   useEffect(() => {
-    if (open) setSelectedOnly(Boolean(selectedPath));
-  }, [open, selectedPath]);
+    if (open) setSelectedOnly(selectedPaths.length > 0);
+  }, [open, selectedPaths]);
 
   const chooseDestination = () =>
     pickerGate.run("extract-picker", async () => {
@@ -2271,7 +2387,7 @@ function ExtractDialog({
       await jobApi.startExtract({
         archivePath: archive.summary.path,
         destination,
-        entries: selectedOnly && selectedPath ? [selectedPath] : [],
+        entries: selectedOnly ? selectedPaths : [],
         password: password || null,
         conflict,
         restorePermissions,
@@ -2339,14 +2455,15 @@ function ExtractDialog({
             <input
               type="checkbox"
               checked={selectedOnly}
-              disabled={!selectedPath}
+              disabled={selectedPaths.length === 0}
               onChange={(event) => setSelectedOnly(event.target.checked)}
             />
             {t("extractSelectedOnly")}
           </label>
-          {!selectedPath && (
+          {selectedPaths.length === 0 && (
             <p className={styles.formHint}>{t("selectItemToExtractOnly")}</p>
           )}
+          {selectedOnly && <ArchiveSelection paths={selectedPaths} />}
           <label className={styles.checkRow}>
             <input
               type="checkbox"
@@ -2390,7 +2507,7 @@ function ExtractDialog({
           >
             {submitting
               ? t("startingExtraction")
-              : selectedOnly && selectedPath
+              : selectedOnly && selectedPaths.length > 0
                 ? t("startExtractingSelected")
                 : t("startExtractingAll")}
           </Button>
@@ -2760,12 +2877,22 @@ function TableSkeleton() {
   );
 }
 
-function handleEntryKey(
-  event: KeyboardEvent<HTMLTableRowElement>,
-  open: () => void,
-) {
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    open();
-  }
+function ArchiveSelection({ paths }: { paths: string[] }) {
+  const { locale, t } = useI18n();
+  return (
+    <div>
+      <p className={styles.formHint}>
+        {t("selectionCount").replace(
+          "{count}",
+          formatCount(paths.length, locale),
+        )}{" "}
+        · {t("selectionDescendants")}
+      </p>
+      <ul className={styles.selectionPaths}>
+        {paths.map((path) => (
+          <li key={path}>{path}</li>
+        ))}
+      </ul>
+    </div>
+  );
 }

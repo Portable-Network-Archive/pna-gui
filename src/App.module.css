@@ -669,8 +669,8 @@
 }
 
 .browserMain {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   padding: 12px 14px 14px;
@@ -1276,4 +1276,51 @@
 .extractForm select:focus-visible {
   outline: 2px solid var(--app-blue);
   outline-offset: 1px;
+}
+
+.selectionToolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.selectionToolbar button {
+  padding: 4px 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.selectionToolbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.selectionCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.selectionCell input {
+  flex: 0 0 auto;
+}
+.selectionPaths {
+  max-height: 180px;
+  overflow: auto;
+  padding-left: 24px;
+  overflow-wrap: anywhere;
+}
+
+.browserMain > .listPanel {
+  flex: 1;
+}
+.browserMain > .pathBar,
+.browserMain > .searchSummary,
+.browserMain > .selectionToolbar {
+  flex-shrink: 0;
+}
+.selectionCell > .fileIdentity {
+  flex: 1;
 }

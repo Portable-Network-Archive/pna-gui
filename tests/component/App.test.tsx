@@ -120,6 +120,7 @@ function installInvokeHandler(options?: {
   openError?: unknown;
   openResults?: Record<string, OpenArchiveResult>;
   searchItems?: ArchiveEntry[];
+  rootItems?: ArchiveEntry[];
   bootstrapDelayMs?: number;
 }) {
   bridge.invoke.mockImplementation(
@@ -149,9 +150,13 @@ function installInvokeHandler(options?: {
           return undefined;
         case "archive_children":
           return {
-            items: args?.parentEntryId ? [] : [directory],
+            items: args?.parentEntryId
+              ? []
+              : (options?.rootItems ?? [directory]),
             nextCursor: null,
-            totalCount: args?.parentEntryId ? 0 : 1,
+            totalCount: args?.parentEntryId
+              ? 0
+              : (options?.rootItems?.length ?? 1),
           };
         case "archive_search":
           return {
@@ -1588,11 +1593,11 @@ describe("application shell", () => {
     const dialog = screen.getByRole("dialog", { name: "Extract archive" });
     expect(
       within(dialog).getByRole("checkbox", {
-        name: "Extract only the selected item",
+        name: "Extract only the selected items",
       }),
     ).toBeChecked();
     expect(
-      within(dialog).getByRole("button", { name: "Extract Selected Item" }),
+      within(dialog).getByRole("button", { name: "Extract Selected Items" }),
     ).toBeDisabled();
 
     bridge.openDialog.mockResolvedValue("/tmp/restore");
@@ -1600,12 +1605,119 @@ describe("application shell", () => {
       within(dialog).getByRole("button", { name: "Choose destination" }),
     );
     await userEvent.click(
-      within(dialog).getByRole("button", { name: "Extract Selected Item" }),
+      within(dialog).getByRole("button", { name: "Extract Selected Items" }),
     );
 
     expect(bridge.invoke).toHaveBeenCalledWith("job_start_extract", {
       request: expect.objectContaining({ entries: ["src"] }),
     });
+  });
+
+  it("confirms and deletes multiple selected paths while keeping rename single-item", async () => {
+    const user = userEvent.setup();
+    await renderHome([recent]);
+    const entries = [
+      directory,
+      { ...directory, id: "entry-docs", name: "docs", path: "docs" },
+      { ...directory, id: "entry-assets", name: "assets", path: "assets" },
+    ];
+    installInvokeHandler({ recentItems: [recent], rootItems: entries });
+    await user.click(
+      screen.getByRole("button", { name: /^demo\.pna \/tmp\/demo\.pna$/ }),
+    );
+    const src = await screen.findByRole("row", { name: /src Folder/ });
+    await user.click(src);
+    await user.keyboard("{Shift>}");
+    await user.click(screen.getByRole("row", { name: /assets Folder/ }));
+    await user.keyboard("{/Shift}");
+    expect(screen.getByText(/^[0-9]+ selected$/)).toHaveTextContent(
+      "3 selected",
+    );
+    await user.click(screen.getByRole("checkbox", { name: "Select docs" }));
+    expect(screen.getByText(/^[0-9]+ selected$/)).toHaveTextContent(
+      "2 selected",
+    );
+    await user.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveAttribute(
+      "data-disabled",
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const dialog = screen.getByRole("alertdialog", {
+      name: "Delete from archive?",
+    });
+    expect(
+      within(dialog)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["src", "assets"]);
+    bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete from Archive" }),
+    );
+    expect(bridge.invoke).toHaveBeenCalledWith("job_start_delete_entries", {
+      request: {
+        archivePath: recent.path,
+        outputPath: "/tmp/demo-edited.pna",
+        entries: ["src", "assets"],
+        password: null,
+      },
+    });
+  });
+
+  it("extracts a keyboard-selected range and clears selection when entering a folder", async () => {
+    const user = userEvent.setup();
+    await renderHome([recent]);
+    installInvokeHandler({
+      recentItems: [recent],
+      rootItems: [
+        directory,
+        { ...directory, id: "entry-docs", name: "docs", path: "docs" },
+      ],
+    });
+    await user.click(
+      screen.getByRole("button", { name: /^demo\.pna \/tmp\/demo\.pna$/ }),
+    );
+    const src = await screen.findByRole("row", { name: /src Folder/ });
+    src.focus();
+    await user.keyboard(" {Shift>}{ArrowDown}{/Shift}");
+    expect(screen.getByText(/^[0-9]+ selected$/)).toHaveTextContent(
+      "2 selected",
+    );
+    await user.click(screen.getByRole("button", { name: "Extract" }));
+    const dialog = screen.getByRole("dialog", { name: "Extract archive" });
+    expect(
+      within(dialog)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["src", "docs"]);
+    const scope = within(dialog).getByRole("checkbox", {
+      name: "Extract only the selected items",
+    });
+    await user.click(scope);
+    expect(within(dialog).queryByRole("listitem")).not.toBeInTheDocument();
+    await user.click(scope);
+    bridge.openDialog.mockResolvedValue("/tmp/restore");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Choose destination" }),
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: "Extract Selected Items" }),
+    );
+    expect(bridge.invoke).toHaveBeenCalledWith("job_start_extract", {
+      request: expect.objectContaining({ entries: ["src", "docs"] }),
+    });
+    const docs = screen.getByRole("row", { name: /docs Folder/ });
+    docs.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(screen.getByText(/^[0-9]+ selected$/)).toHaveTextContent(
+        "0 selected",
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Extract" }));
+    expect(
+      screen.getByRole("checkbox", { name: "Extract only the selected items" }),
+    ).toBeDisabled();
   });
 
   it("[UI-P2-OPEN-SINGLE-FLIGHT] ignores duplicate open actions while indexing", async () => {
