@@ -331,26 +331,6 @@ export function CreateWizard({
           </div>
           <div className={styles.settingsGrid}>
             <label>
-              {t("compression")}
-              <select
-                aria-label={t("compression")}
-                value={settings.compression}
-                onChange={(event) => {
-                  const compression = event.target.value as Compression;
-                  setConfiguration((current) => ({
-                    preset: "custom",
-                    settings: { ...current.settings, compression },
-                  }));
-                }}
-              >
-                {COMPRESSION.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
               {t("encryption")}
               <select
                 aria-label={t("encryption")}
@@ -417,24 +397,44 @@ export function CreateWizard({
                 </label>
               </>
             )}
-            <label className={styles.check}>
-              <input
-                type="checkbox"
-                checked={settings.solid}
-                onChange={(event) => {
-                  const solid = event.target.checked;
-                  setConfiguration((current) => ({
-                    preset: "custom",
-                    settings: { ...current.settings, solid },
-                  }));
-                }}
-              />
-              {t("solidMode")}
-            </label>
           </div>
           <details className={styles.advancedSettings}>
             <summary>{t("advancedCreationSettings")}</summary>
             <div className={styles.settingsGrid}>
+              <label>
+                {t("compression")}
+                <select
+                  aria-label={t("compression")}
+                  value={settings.compression}
+                  onChange={(event) => {
+                    const compression = event.target.value as Compression;
+                    setConfiguration((current) => ({
+                      preset: "custom",
+                      settings: { ...current.settings, compression },
+                    }));
+                  }}
+                >
+                  {COMPRESSION.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.check}>
+                <input
+                  type="checkbox"
+                  checked={settings.solid}
+                  onChange={(event) => {
+                    const solid = event.target.checked;
+                    setConfiguration((current) => ({
+                      preset: "custom",
+                      settings: { ...current.settings, solid },
+                    }));
+                  }}
+                />
+                {t("solidMode")}
+              </label>
               <label className={styles.check}>
                 <input
                   type="checkbox"
