@@ -1348,29 +1348,39 @@ describe("application shell", () => {
     expect(submit).toBeEnabled();
   });
 
-  it("[UI-OPEN-WRONG-PASSWORD-RECOVERY] reports a wrong password and keeps the form reusable", async () => {
+  it("[UI-OPEN-WRONG-PASSWORD-RECOVERY] recovers and reuses only the verified password within its archive session", async () => {
     installInvokeHandler({ recentItems: [recent] });
     const originalInvoke = bridge.invoke.getMockImplementation()!;
-    let attempt = 0;
+    const encryptedSummary = { ...summary, encryptionMethods: ["AES"] };
     bridge.invoke.mockImplementation(
       async (command: string, args?: Record<string, unknown>) => {
         if (command === "archive_open") {
-          attempt += 1;
-          if (attempt === 1) {
+          if (args?.path === "/tmp/other.pna") {
+            return {
+              handle: "archive-other",
+              summary: {
+                ...encryptedSummary,
+                handle: "archive-other",
+                path: "/tmp/other.pna",
+                displayName: "other.pna",
+              },
+            };
+          }
+          if (!args?.password) {
             throw {
               code: "PASSWORD_REQUIRED",
               message: "password required",
               retryable: true,
             };
           }
-          if (attempt === 2) {
+          if (args?.password !== "secret") {
             throw {
               code: "WRONG_PASSWORD",
               message: "wrong password",
               retryable: true,
             };
           }
-          return { handle: summary.handle, summary };
+          return { handle: summary.handle, summary: encryptedSummary };
         }
         return originalInvoke(command, args);
       },
@@ -1399,6 +1409,72 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("button", { name: "Open another archive" }),
     ).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Extract" }));
+    let extract = screen.getByRole("dialog", { name: "Extract archive" });
+    expect(within(extract).getByLabelText("Password")).toHaveValue("secret");
+    bridge.openDialog.mockResolvedValueOnce("/tmp/restore");
+    await userEvent.click(
+      within(extract).getByRole("button", { name: "Choose destination" }),
+    );
+    await userEvent.click(
+      within(extract).getByRole("button", { name: "Extract All Items" }),
+    );
+    expect(bridge.invoke).toHaveBeenCalledWith("job_start_extract", {
+      request: expect.objectContaining({
+        archivePath: recent.path,
+        password: "secret",
+      }),
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Extract" })).toHaveFocus(),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Extract" }));
+    extract = screen.getByRole("dialog", { name: "Extract archive" });
+    const extractPassword = within(extract).getByLabelText("Password");
+    expect(extractPassword).toHaveValue("secret");
+    await userEvent.clear(extractPassword);
+    await userEvent.type(extractPassword, "unverified");
+    await userEvent.click(
+      within(extract).getByRole("button", { name: "Cancel" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Extract" })).toHaveFocus(),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Extract" }));
+    extract = screen.getByRole("dialog", { name: "Extract archive" });
+    expect(within(extract).getByLabelText("Password")).toHaveValue("secret");
+    await userEvent.click(
+      within(extract).getByRole("button", { name: "Cancel" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Extract" })).toHaveFocus(),
+    );
+    bridge.openDialog.mockResolvedValueOnce("/tmp/other.pna");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Open another archive" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("archive-home")).toHaveTextContent("other.pna"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Extract" }));
+    extract = screen.getByRole("dialog", { name: "Extract archive" });
+    expect(within(extract).getByLabelText("Password")).toHaveValue("");
+    await userEvent.click(
+      within(extract).getByRole("button", { name: "Cancel" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Extract" })).toHaveFocus(),
+    );
+    await userEvent.click(screen.getByTestId("archive-home"));
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /^demo\.pna \/tmp\/demo\.pna$/,
+      }),
+    );
+    const reopen = await screen.findByRole("dialog", {
+      name: "Password required",
+    });
+    expect(within(reopen).getByLabelText("Password")).toHaveValue("");
   });
 
   it("[UI-DIALOG-FOCUS-RETURN] restores the password trigger after Escape", async () => {
@@ -1847,6 +1923,9 @@ describe("application shell", () => {
     expect(
       screen.queryByRole("dialog", { name: "Password required" }),
     ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Extract" }));
+    const extract = screen.getByRole("dialog", { name: "Extract archive" });
+    expect(within(extract).getByLabelText("Password")).toHaveValue("secret");
   });
 
   it("retains the creation draft across navigation and resets it for a new app session", async () => {

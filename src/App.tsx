@@ -1640,6 +1640,7 @@ function BrowserView({
         open={extractOpen}
         archive={archive}
         selectedPaths={selectedPaths}
+        sessionPassword={sessionPassword}
         onOpenChange={setExtractOpen}
         onCloseAutoFocus={restoreDialogFocus}
       />
@@ -2326,12 +2327,14 @@ function ExtractDialog({
   open,
   archive,
   selectedPaths,
+  sessionPassword,
   onOpenChange,
   onCloseAutoFocus,
 }: {
   open: boolean;
   archive: OpenArchiveResult;
   selectedPaths: string[];
+  sessionPassword?: string;
   onOpenChange: (open: boolean) => void;
   onCloseAutoFocus?: (event: Event) => void;
 }) {
@@ -2365,6 +2368,10 @@ function ExtractDialog({
   useEffect(() => {
     if (open) setSelectedOnly(selectedPaths.length > 0);
   }, [open, selectedPaths]);
+
+  useEffect(() => {
+    setPassword(open && encrypted ? (sessionPassword ?? "") : "");
+  }, [encrypted, open, sessionPassword]);
 
   const chooseDestination = () =>
     pickerGate.run("extract-picker", async () => {
