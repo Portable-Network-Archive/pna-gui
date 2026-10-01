@@ -1937,6 +1937,7 @@ describe("application shell", () => {
     bridge.openDialog.mockResolvedValueOnce(["/tmp/draft.txt"]);
     await user.click(screen.getByRole("button", { name: "Add files" }));
     await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByText("Advanced settings"));
     await user.selectOptions(screen.getByLabelText("Compression"), "xz");
     await user.selectOptions(screen.getByLabelText("Encryption"), "aes");
     await user.type(screen.getByLabelText("Password"), "session-secret");

@@ -137,7 +137,12 @@ describe("archive creation wizard", () => {
     expect(
       screen.getByLabelText("Preserve Unix permissions"),
     ).not.toBeVisible();
+    expect(screen.getByLabelText("Compression")).not.toBeVisible();
+    expect(screen.getByLabelText("Solid mode")).not.toBeVisible();
+    expect(screen.getByLabelText("Encryption")).toBeVisible();
     await userEvent.click(screen.getByText("Advanced settings"));
+    expect(screen.getByLabelText("Compression")).toBeVisible();
+    expect(screen.getByLabelText("Solid mode")).toBeVisible();
     expect(screen.getByLabelText("Preserve Unix permissions")).toBeVisible();
     expect(screen.getByLabelText("Reproducible output")).toBeVisible();
   });
@@ -367,6 +372,7 @@ describe("archive creation wizard", () => {
     renderCreate();
     await addSource();
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    await userEvent.click(screen.getByText("Advanced settings"));
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Compression" }),
       "xz",
