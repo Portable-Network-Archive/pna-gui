@@ -116,6 +116,12 @@ const ENGLISH = {
   next: "Next",
   confirmPassword: "Confirm password",
   preservePermissions: "Preserve Unix permissions",
+  advancedCreationSettings: "Advanced settings",
+  reproducibleCreation: "Reproducible output",
+  reproducibleCreationHelp:
+    "Produces repeatable output for unchanged source files. Turn off encryption to enable this option; Unix permissions are omitted while it is enabled.",
+  settingEnabled: "Enabled",
+  settingDisabled: "Disabled",
   createPreservationScope:
     "Stores file contents and folder structure. The permission option also stores Unix access permissions on macOS and Linux. Original timestamps, ownership, and extended attributes are excluded; symbolic links are unsupported.",
   reviewCreate: "Review archive creation",
@@ -132,20 +138,15 @@ const ENGLISH = {
   startingCreation: "Starting…",
   queued: "Queued",
   preset_standard: "Standard",
-  preset_distribution: "Distribution",
-  preset_maximum: "Maximum compression",
-  preset_fast: "Fast",
-  preset_reproducible: "Reproducible",
+  preset_maximum: "Prefer smaller size",
+  preset_fast: "Prefer speed",
   preset_custom: "Custom",
   preset_standard_description:
     "Balanced compression and individual-file access.",
-  preset_distribution_description:
-    "Straightforward sharing without source permissions.",
   preset_maximum_description:
-    "Smallest practical size; takes longer to process.",
-  preset_fast_description: "Fastest processing with a larger archive.",
-  preset_reproducible_description:
-    "Repeatable output for unchanged source files.",
+    "Smaller archives; slower creation and selected-file extraction.",
+  preset_fast_description:
+    "Skips compression for faster creation and larger archives.",
   extract: "Extract",
   addFilesToArchive: "Add files",
   editSaveMode: "Save edited archive",
@@ -615,6 +616,12 @@ const JAPANESE: Record<TranslationKey, string> = {
   next: "次へ",
   confirmPassword: "パスワードの確認",
   preservePermissions: "Unixのアクセス権を保持",
+  advancedCreationSettings: "詳細設定",
+  reproducibleCreation: "再現可能な出力",
+  reproducibleCreationHelp:
+    "同じ入力から同じ出力を作成します。有効にするには暗号化を解除してください。有効な間はUnixのアクセス権を保存しません。",
+  settingEnabled: "有効",
+  settingDisabled: "無効",
   createPreservationScope:
     "ファイル内容とフォルダー構成を保存します。権限の保持を有効にすると、macOS・LinuxではUnixのアクセス権も保存します。元の日時・所有者・拡張属性は保存対象外です。シンボリックリンクには対応していません。",
   reviewCreate: "作成内容の確認",
@@ -631,17 +638,14 @@ const JAPANESE: Record<TranslationKey, string> = {
   startingCreation: "開始中…",
   queued: "待機中",
   preset_standard: "標準",
-  preset_distribution: "配布",
-  preset_maximum: "高圧縮",
-  preset_fast: "高速",
-  preset_reproducible: "再現可能",
+  preset_maximum: "容量優先",
+  preset_fast: "速度優先",
   preset_custom: "カスタム",
   preset_standard_description: "圧縮率と個別ファイルへのアクセスを両立します。",
-  preset_distribution_description: "元の権限を含めず、共有しやすくします。",
   preset_maximum_description:
-    "サイズを最小化しますが、処理に時間がかかります。",
-  preset_fast_description: "サイズより処理速度を優先します。",
-  preset_reproducible_description: "同じ入力から再現可能な出力を作成します。",
+    "容量を優先します。作成や一部のファイルの展開に時間がかかります。",
+  preset_fast_description:
+    "圧縮せず、作成速度を優先します。容量は大きくなります。",
   extract: "展開",
   addFilesToArchive: "ファイルを追加",
   editSaveMode: "編集結果の保存方法",

@@ -117,11 +117,29 @@ describe("archive creation wizard", () => {
       screen.getByText("Balanced compression and individual-file access."),
     ).toBeVisible();
     expect(
-      screen.getByText("Smallest practical size; takes longer to process."),
+      screen.getByText(
+        "Smaller archives; slower creation and selected-file extraction.",
+      ),
     ).toBeVisible();
     expect(
-      screen.getByText("Repeatable output for unchanged source files."),
+      screen.getByRole("button", { name: /^Prefer speed\b/ }),
     ).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Standard\b/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.queryByRole("button", { name: /^Distribution\b/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Reproducible\b/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Preserve Unix permissions"),
+    ).not.toBeVisible();
+    await userEvent.click(screen.getByText("Advanced settings"));
+    expect(screen.getByLabelText("Preserve Unix permissions")).toBeVisible();
+    expect(screen.getByLabelText("Reproducible output")).toBeVisible();
   });
 
   it("[UI-CREATE-SAVE-CANCEL] does not start a job when save selection is cancelled", async () => {
@@ -202,6 +220,18 @@ describe("archive creation wizard", () => {
       screen.getByRole("combobox", { name: "Encryption" }),
       "aes",
     );
+    await userEvent.click(screen.getByText("Advanced settings"));
+    expect(screen.getByLabelText("Reproducible output")).toBeDisabled();
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Prefer speed\b/ }),
+    );
+    expect(screen.getByLabelText("Compression")).toHaveValue("store");
+    expect(screen.getByLabelText("Encryption")).toHaveValue("aes");
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Prefer smaller size\b/ }),
+    );
+    expect(screen.getByLabelText("Compression")).toHaveValue("xz");
+    expect(screen.getByLabelText("Encryption")).toHaveValue("aes");
     expect(
       screen.getByText(
         "Enter a password before creating an encrypted archive.",
@@ -214,6 +244,61 @@ describe("archive creation wizard", () => {
     expect(
       screen.getByRole("button", { name: "Start creating" }),
     ).toBeEnabled();
+    bridge.save.mockResolvedValue("/output/encrypted.pna");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Start creating" }),
+    );
+    expect(bridge.invoke).toHaveBeenCalledWith("job_start_create", {
+      request: expect.objectContaining({
+        options: expect.objectContaining({
+          compression: "xz",
+          solid: true,
+          encryption: "aes",
+          password: "secret",
+          reproducible: false,
+        }),
+      }),
+    });
+  });
+
+  it("creates reproducible output through advanced settings and keeps it across preset changes", async () => {
+    renderCreate();
+    await addSource();
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    await userEvent.click(screen.getByText("Advanced settings"));
+    await userEvent.click(screen.getByLabelText("Reproducible output"));
+    expect(
+      screen.getByLabelText("Preserve Unix permissions"),
+    ).not.toBeChecked();
+    expect(screen.getByLabelText("Preserve Unix permissions")).toBeDisabled();
+    expect(screen.getByLabelText("Encryption")).toBeDisabled();
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Prefer speed\b/ }),
+    );
+    expect(screen.getByLabelText("Reproducible output")).toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(
+      screen.getByText("Preserve Unix permissions").parentElement,
+    ).toHaveTextContent("Disabled");
+    expect(
+      screen.getByText("Reproducible output").parentElement,
+    ).toHaveTextContent("Enabled");
+    bridge.save.mockResolvedValue("/output/reproducible.pna");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Start creating" }),
+    );
+    expect(bridge.invoke).toHaveBeenCalledWith("job_start_create", {
+      request: expect.objectContaining({
+        options: {
+          compression: "store",
+          solid: false,
+          encryption: "none",
+          password: null,
+          preservePermissions: false,
+          reproducible: true,
+        },
+      }),
+    });
   });
 
   it("[UI-CREATE-PROCESSING] disables submission while queuing and [UI-CREATE-SUCCESS-RESET] resets after enqueue", async () => {

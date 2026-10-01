@@ -375,3 +375,22 @@
     font-size: 0;
   }
 }
+
+.advancedSettings {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+}
+.advancedSettings summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.advancedSettings summary:focus-visible {
+  outline: 2px solid var(--app-blue);
+  outline-offset: 2px;
+}
+.advancedSettings[open] summary {
+  margin-bottom: 14px;
+}
