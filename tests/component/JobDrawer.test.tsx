@@ -106,7 +106,17 @@ describe("background job drawer", () => {
     const drawer = await screen.findByRole("region", {
       name: "Background jobs",
     });
-    const progress = within(drawer).getByRole("progressbar");
+    await userEvent.click(screen.getByTestId("job-center-open"));
+    const center = screen.getByRole("dialog", { name: "Job center" });
+    const announcer = screen.getByTestId("job-announcer");
+    const mutations = vi.fn();
+    const observer = new MutationObserver(mutations);
+    observer.observe(announcer, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    const progress = within(center).getByRole("progressbar");
     expect(progress).toHaveAttribute("value", "1024");
     expect(progress).toHaveAttribute("max", "4096");
     act(() =>
@@ -115,7 +125,22 @@ describe("background job drawer", () => {
       }),
     );
     expect(within(drawer).getByText("Finalizing output")).toBeVisible();
-    expect(within(drawer).getByRole("progressbar")).not.toHaveAttribute(
+    expect(announcer).toHaveTextContent("Archive creation: Finalizing output");
+    await act(async () => undefined);
+    expect(mutations).toHaveBeenCalledTimes(1);
+    mutations.mockClear();
+    await act(async () => {
+      bridge.jobHandler?.({
+        payload: {
+          ...running,
+          completedBytes: 4096,
+          phase: "finalizing",
+          currentItem: "next.txt",
+        },
+      });
+    });
+    expect(mutations).not.toHaveBeenCalled();
+    expect(within(center).getByRole("progressbar")).not.toHaveAttribute(
       "value",
     );
     expect(within(drawer).queryByText("Completed")).not.toBeInTheDocument();
@@ -130,7 +155,7 @@ describe("background job drawer", () => {
       }),
     );
     expect(within(drawer).getByText("1 KB processed")).toBeVisible();
-    expect(within(drawer).getByRole("progressbar")).not.toHaveAttribute(
+    expect(within(center).getByRole("progressbar")).not.toHaveAttribute(
       "value",
     );
     act(() =>
@@ -139,12 +164,11 @@ describe("background job drawer", () => {
       }),
     );
     expect(within(drawer).getByText("0 B of 0 B processed")).toBeVisible();
-    expect(within(drawer).getByRole("progressbar")).not.toHaveAttribute(
+    expect(within(center).getByRole("progressbar")).not.toHaveAttribute(
       "value",
     );
-    await userEvent.click(screen.getByTestId("job-center-open"));
-    const center = screen.getByRole("dialog", { name: "Job center" });
     expect(within(center).getByText("1 of 4 items")).toBeVisible();
+    observer.disconnect();
   });
 
   it("[UI-JOB-TERMINAL-ANNOUNCEMENT] announces a completed job from an always-mounted status region", async () => {

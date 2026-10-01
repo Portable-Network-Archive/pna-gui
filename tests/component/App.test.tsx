@@ -168,7 +168,9 @@ function installInvokeHandler(options?: {
           };
         case "archive_entry_details":
           return {
-            entry: directory,
+            entry:
+              options?.rootItems?.find((entry) => entry.id === args?.entryId) ??
+              directory,
             createdAt: null,
             accessedAt: null,
             permission: null,
@@ -717,28 +719,49 @@ describe("application shell", () => {
   });
 
   it("[UI-UPDATE-RENAME-FLOW] resets cancelled overwrite choices and rejects an existing copy before queuing", async () => {
+    const user = userEvent.setup();
     bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
-    await openRecentArchive();
-    await userEvent.click(
-      await screen.findByRole("row", { name: /src Folder/ }),
+    await renderHome([recent]);
+    const other = {
+      ...directory,
+      id: "entry-other",
+      name: "other",
+      path: "other",
+    };
+    installInvokeHandler({
+      recentItems: [recent],
+      rootItems: [directory, other],
+    });
+    await user.click(
+      screen.getByRole("button", { name: /^demo\.pna \/tmp\/demo\.pna$/ }),
     );
+    await user.click(await screen.findByRole("row", { name: /src Folder/ }));
+    await user.keyboard("{Control>}");
+    await user.click(screen.getByRole("row", { name: /other Folder/ }));
+    await user.click(screen.getByRole("row", { name: /other Folder/ }));
+    await user.keyboard("{/Control}");
     const openRename = async () => {
-      await userEvent.click(screen.getByRole("button", { name: "More" }));
-      await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     };
     await openRename();
-    await userEvent.selectOptions(
+    const renameDialog = screen.getByRole("dialog", {
+      name: "Rename archive item",
+    });
+    expect(renameDialog).toHaveAccessibleDescription("src");
+
+    await user.selectOptions(
       screen.getByLabelText("Save edited archive"),
       "overwrite",
     );
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     await openRename();
     expect(screen.getByLabelText("Save edited archive")).toHaveValue("copy");
     const input = screen.getByRole("textbox", { name: "New name" });
-    await userEvent.clear(input);
-    await userEvent.type(input, "manual");
+    await user.clear(input);
+    await user.type(input, "manual");
     bridge.invoke.mockResolvedValueOnce(true);
-    await userEvent.click(screen.getByRole("button", { name: "Rename Item" }));
+    await user.click(screen.getByRole("button", { name: "Rename Item" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "That filename already exists",
     );
@@ -748,7 +771,7 @@ describe("application shell", () => {
     );
     expect(input).toHaveValue("manual");
     bridge.saveDialog.mockResolvedValue("/tmp/another-name");
-    await userEvent.click(screen.getByRole("button", { name: "Rename Item" }));
+    await user.click(screen.getByRole("button", { name: "Rename Item" }));
     expect(bridge.invoke).toHaveBeenCalledWith("archive_output_exists", {
       path: "/tmp/another-name.pna",
     });
