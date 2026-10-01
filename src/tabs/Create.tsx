@@ -13,7 +13,7 @@ const COMPRESSION = ["store", "deflate", "zstd", "xz"] as const;
 type Compression = (typeof COMPRESSION)[number];
 const ENCRYPTION = ["none", "aes", "camellia"] as const;
 type Encryption = (typeof ENCRYPTION)[number];
-type Preset = "standard" | "distribution" | "maximum" | "fast" | "reproducible";
+type Preset = "standard" | "fast" | "maximum";
 type PresetSelection = Preset | "custom";
 
 interface Settings {
@@ -24,42 +24,10 @@ interface Settings {
   reproducible: boolean;
 }
 
-const PRESETS: Record<Preset, Settings> = {
-  standard: {
-    compression: "zstd",
-    encryption: "none",
-    solid: false,
-    preservePermissions: true,
-    reproducible: false,
-  },
-  distribution: {
-    compression: "zstd",
-    encryption: "none",
-    solid: false,
-    preservePermissions: false,
-    reproducible: false,
-  },
-  maximum: {
-    compression: "xz",
-    encryption: "none",
-    solid: true,
-    preservePermissions: true,
-    reproducible: false,
-  },
-  fast: {
-    compression: "store",
-    encryption: "none",
-    solid: false,
-    preservePermissions: true,
-    reproducible: false,
-  },
-  reproducible: {
-    compression: "zstd",
-    encryption: "none",
-    solid: false,
-    preservePermissions: false,
-    reproducible: true,
-  },
+const PRESETS: Record<Preset, Pick<Settings, "compression" | "solid">> = {
+  standard: { compression: "zstd", solid: false },
+  fast: { compression: "store", solid: false },
+  maximum: { compression: "xz", solid: true },
 };
 
 export function useCreationDraft() {
@@ -68,7 +36,15 @@ export function useCreationDraft() {
   const [configuration, setConfiguration] = useState<{
     preset: PresetSelection;
     settings: Settings;
-  }>({ preset: "standard", settings: PRESETS.standard });
+  }>({
+    preset: "standard",
+    settings: {
+      ...PRESETS.standard,
+      encryption: "none",
+      preservePermissions: true,
+      reproducible: false,
+    },
+  });
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [overwrite, setOverwrite] = useState(false);
@@ -193,11 +169,10 @@ export function CreateWizard({
   }, [password, passwordConfirmation, settings, t]);
 
   const applyPreset = (next: Preset) => {
-    setConfiguration({ preset: next, settings: PRESETS[next] });
-    if (next === "reproducible") {
-      setPassword("");
-      setPasswordConfirmation("");
-    }
+    setConfiguration((current) => ({
+      preset: next,
+      settings: { ...current.settings, ...PRESETS[next] },
+    }));
   };
 
   const start = () =>
@@ -339,19 +314,12 @@ export function CreateWizard({
         <div className={styles.panel}>
           <p>{t("chooseCreateSettings")}</p>
           <div className={styles.presets}>
-            {(
-              [
-                "standard",
-                "distribution",
-                "maximum",
-                "fast",
-                "reproducible",
-              ] as Preset[]
-            ).map((value) => (
+            {(["standard", "fast", "maximum"] as Preset[]).map((value) => (
               <button
                 type="button"
                 key={value}
                 data-selected={preset === value}
+                aria-pressed={preset === value}
                 onClick={() => applyPreset(value)}
               >
                 <strong>{t(`preset_${value}` as TranslationKey)}</strong>
@@ -386,6 +354,10 @@ export function CreateWizard({
               {t("encryption")}
               <select
                 aria-label={t("encryption")}
+                disabled={settings.reproducible}
+                aria-describedby={
+                  settings.reproducible ? "create-reproducible-hint" : undefined
+                }
                 value={settings.encryption}
                 onChange={(event) => {
                   const value = event.target.value as Encryption;
@@ -459,21 +431,57 @@ export function CreateWizard({
               />
               {t("solidMode")}
             </label>
-            <label className={styles.check}>
-              <input
-                type="checkbox"
-                checked={settings.preservePermissions}
-                onChange={(event) => {
-                  const preservePermissions = event.target.checked;
-                  setConfiguration((current) => ({
-                    preset: "custom",
-                    settings: { ...current.settings, preservePermissions },
-                  }));
-                }}
-              />
-              {t("preservePermissions")}
-            </label>
           </div>
+          <details className={styles.advancedSettings}>
+            <summary>{t("advancedCreationSettings")}</summary>
+            <div className={styles.settingsGrid}>
+              <label className={styles.check}>
+                <input
+                  type="checkbox"
+                  checked={settings.preservePermissions}
+                  disabled={settings.reproducible}
+                  aria-describedby="create-reproducible-hint"
+                  onChange={(event) => {
+                    const preservePermissions = event.target.checked;
+                    setConfiguration((current) => ({
+                      preset: "custom",
+                      settings: { ...current.settings, preservePermissions },
+                    }));
+                  }}
+                />
+                {t("preservePermissions")}
+              </label>
+              <label className={styles.check}>
+                <input
+                  type="checkbox"
+                  checked={settings.reproducible}
+                  disabled={settings.encryption !== "none"}
+                  aria-describedby="create-reproducible-hint"
+                  onChange={(event) => {
+                    const reproducible = event.target.checked;
+                    setConfiguration((current) => ({
+                      preset: "custom",
+                      settings: {
+                        ...current.settings,
+                        reproducible,
+                        preservePermissions: reproducible
+                          ? false
+                          : current.settings.preservePermissions,
+                      },
+                    }));
+                    if (reproducible) {
+                      setPassword("");
+                      setPasswordConfirmation("");
+                    }
+                  }}
+                />
+                {t("reproducibleCreation")}
+              </label>
+            </div>
+            <p id="create-reproducible-hint" className={styles.hint}>
+              {t("reproducibleCreationHelp")}
+            </p>
+          </details>
           <p className={styles.hint}>{t("createPreservationScope")}</p>
           {validation && (
             <p
@@ -514,6 +522,24 @@ export function CreateWizard({
             <div>
               <dt>{t("configuration")}</dt>
               <dd>{settings.solid ? "Solid" : "Normal"}</dd>
+            </div>
+            <div>
+              <dt>{t("preservePermissions")}</dt>
+              <dd>
+                {t(
+                  settings.preservePermissions
+                    ? "settingEnabled"
+                    : "settingDisabled",
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("reproducibleCreation")}</dt>
+              <dd>
+                {t(
+                  settings.reproducible ? "settingEnabled" : "settingDisabled",
+                )}
+              </dd>
             </div>
           </dl>
           <label className={styles.check}>

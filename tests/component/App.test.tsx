@@ -1706,6 +1706,9 @@ describe("application shell", () => {
     expect(bridge.invoke).toHaveBeenCalledWith("job_start_extract", {
       request: expect.objectContaining({ entries: ["src", "docs"] }),
     });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Extract" })).toHaveFocus(),
+    );
     const docs = screen.getByRole("row", { name: /docs Folder/ });
     docs.focus();
     await user.keyboard("{Enter}");
