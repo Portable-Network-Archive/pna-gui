@@ -1684,7 +1684,7 @@ function BrowserView({
       >
         <Dialog.Content maxWidth="480px" onCloseAutoFocus={restoreDialogFocus}>
           <Dialog.Title>{t("renameArchiveEntry")}</Dialog.Title>
-          <Dialog.Description>{details?.entry.path ?? ""}</Dialog.Description>
+          <Dialog.Description>{renameEntry?.path ?? ""}</Dialog.Description>
           <div className={styles.extractForm}>
             <label>
               {t("newName")}

@@ -64,6 +64,7 @@ export default function JobDrawer({
   const [listError, setListError] = useState<PresentedActionError>();
   const [listenError, setListenError] = useState<PresentedActionError>();
   const [announcement, setAnnouncement] = useState("");
+  const observedJobStates = useRef(new Map<string, string>());
   const [jobSearch, setJobSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<JobStateFilter>("all");
   const [kindFilter, setKindFilter] = useState<JobSnapshot["kind"] | "all">(
@@ -87,7 +88,14 @@ export default function JobDrawer({
   const refreshJobs = useCallback(async () => {
     try {
       const items = await jobApi.list();
-      if (Array.isArray(items)) setJobs(items);
+      if (Array.isArray(items)) {
+        for (const job of items) {
+          if (!observedJobStates.current.has(job.id)) {
+            observedJobStates.current.set(job.id, jobAnnouncementKey(job));
+          }
+        }
+        setJobs(items);
+      }
       setListError(undefined);
     } catch (caught) {
       setListError(syncErrorMessage(caught));
@@ -105,9 +113,18 @@ export default function JobDrawer({
           "job-update",
           (event) => {
             setListenError(undefined);
-            if (!ACTIVE.has(event.payload.status)) {
+            const job = event.payload;
+            const nextState = jobAnnouncementKey(job);
+            const previousState = observedJobStates.current.get(job.id);
+            observedJobStates.current.set(job.id, nextState);
+            const phaseKey = transferPhaseKey(job);
+            if (
+              previousState !== nextState &&
+              (!ACTIVE.has(job.status) ||
+                (job.status === "running" && phaseKey))
+            ) {
               setAnnouncement(
-                `${jobKindText(event.payload, t)}: ${jobStatusText(event.payload, t)}`,
+                `${jobKindText(job, t)}: ${phaseKey ? t(phaseKey) : jobStatusText(job, t)}`,
               );
             }
             setJobs((current) => {
@@ -663,19 +680,8 @@ function JobRow({
           formatCount(job.completedUnits, locale),
         );
   const transferJob = job.kind === "create" || job.kind === "extract";
-  const stageKeys: Record<string, TranslationKey> = {
-    preparing: "jobStagePreparing",
-    scanning: "jobStageScanning",
-    reading: "jobStageReading",
-    writing: "jobStageCreating",
-    extracting: "jobStageExtracting",
-    finalizing: "jobStageFinalizing",
-    cleaning_up: "jobStageCleaningUp",
-  };
-  const phase =
-    transferJob && ACTIVE.has(job.status)
-      ? t(stageKeys[job.phase] ?? "jobStagePreparing")
-      : undefined;
+  const phaseKey = transferPhaseKey(job);
+  const phase = phaseKey ? t(phaseKey) : undefined;
   const progress =
     transferJob && job.completedBytes != null
       ? job.totalBytes != null
@@ -950,6 +956,27 @@ function JobRow({
       </div>
     </article>
   );
+}
+
+const TRANSFER_STAGE_KEYS: Record<string, TranslationKey> = {
+  preparing: "jobStagePreparing",
+  scanning: "jobStageScanning",
+  reading: "jobStageReading",
+  writing: "jobStageCreating",
+  extracting: "jobStageExtracting",
+  finalizing: "jobStageFinalizing",
+  cleaning_up: "jobStageCleaningUp",
+};
+
+function transferPhaseKey(job: JobSnapshot): TranslationKey | undefined {
+  return (job.kind === "create" || job.kind === "extract") &&
+    ACTIVE.has(job.status)
+    ? (TRANSFER_STAGE_KEYS[job.phase] ?? "jobStagePreparing")
+    : undefined;
+}
+
+function jobAnnouncementKey(job: JobSnapshot): string {
+  return `${job.status}:${transferPhaseKey(job) ?? ""}`;
 }
 
 function jobKindText(
