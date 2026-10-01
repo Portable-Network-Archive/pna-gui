@@ -41,6 +41,15 @@ fn job_observer(app: AppHandle) -> std::sync::Arc<dyn Fn(jobs::JobSnapshot) + Se
 }
 
 #[tauri::command]
+fn archive_output_exists(path: String) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
 fn job_start_create(
     app: AppHandle,
     jobs: State<'_, jobs::JobManager>,
@@ -821,6 +830,7 @@ pub fn run() {
             updates::update_install,
             create,
             extract,
+            archive_output_exists,
             job_start_create,
             job_start_extract,
             job_start_append,

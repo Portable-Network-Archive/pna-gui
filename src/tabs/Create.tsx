@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type SetStateAction,
+} from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { ArchiveIcon, Cross1Icon, FileIcon } from "@radix-ui/react-icons";
 import { Button } from "@radix-ui/themes";
@@ -30,37 +36,65 @@ const PRESETS: Record<Preset, Pick<Settings, "compression" | "solid">> = {
   maximum: { compression: "xz", solid: true },
 };
 
+interface CreationDraft {
+  step: 1 | 2 | 3;
+  sources: string[];
+  configuration: { preset: PresetSelection; settings: Settings };
+  password: string;
+  passwordConfirmation: string;
+  overwrite: boolean;
+}
+
 export function useCreationDraft() {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [sources, setSources] = useState<string[]>([]);
-  const [configuration, setConfiguration] = useState<{
-    preset: PresetSelection;
-    settings: Settings;
-  }>({
-    preset: "standard",
-    settings: {
-      ...PRESETS.standard,
-      encryption: "none",
-      preservePermissions: true,
-      reproducible: false,
+  const [state, setState] = useState<CreationDraft>({
+    step: 1,
+    sources: [],
+    configuration: {
+      preset: "standard",
+      settings: {
+        ...PRESETS.standard,
+        encryption: "none",
+        preservePermissions: true,
+        reproducible: false,
+      },
     },
+    password: "",
+    passwordConfirmation: "",
+    overwrite: false,
   });
-  const [password, setPassword] = useState("");
-  const [passwordConfirmation, setPasswordConfirmation] = useState("");
-  const [overwrite, setOverwrite] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [queuedJob, setQueuedJob] = useState<string>();
+  const actionGate = useMemo(() => createSingleFlightGate(), []);
+  const setters = useMemo(() => {
+    const field =
+      <K extends keyof CreationDraft>(key: K) =>
+      (update: SetStateAction<CreationDraft[K]>) =>
+        setState((current) => ({
+          ...current,
+          [key]: typeof update === "function" ? update(current[key]) : update,
+        }));
+    return {
+      setStep: field("step"),
+      setSources: field("sources"),
+      setConfiguration: field("configuration"),
+      setPassword: field("password"),
+      setPasswordConfirmation: field("passwordConfirmation"),
+      setOverwrite: field("overwrite"),
+    };
+  }, []);
+  const resetAfterSubmission = () =>
+    setState((current) =>
+      current === state ? { ...current, sources: [], step: 1 } : current,
+    );
   return {
-    step,
-    setStep,
-    sources,
-    setSources,
-    configuration,
-    setConfiguration,
-    password,
-    setPassword,
-    passwordConfirmation,
-    setPasswordConfirmation,
-    overwrite,
-    setOverwrite,
+    ...state,
+    ...setters,
+    submitting,
+    setSubmitting,
+    queuedJob,
+    setQueuedJob,
+    actionGate,
+    resetAfterSubmission,
   };
 }
 
@@ -88,13 +122,16 @@ export function CreateWizard({
     setPasswordConfirmation,
     overwrite,
     setOverwrite,
+    submitting,
+    setSubmitting,
+    queuedJob,
+    setQueuedJob,
+    actionGate,
+    resetAfterSubmission,
   } = draft;
   const { preset, settings } = configuration;
   const [draggingOver, setDraggingOver] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<{ summary: string; detail?: string }>();
-  const [queuedJob, setQueuedJob] = useState<string>();
-  const actionGate = useMemo(createSingleFlightGate, []);
   const addSources = useCallback(
     (paths: string[]) => {
       setSources((current) => [...new Set([...current, ...paths])]);
@@ -207,8 +244,7 @@ export function CreateWizard({
           },
         });
         setQueuedJob(outputPath);
-        setSources([]);
-        setStep(1);
+        resetAfterSubmission();
       } catch (caught) {
         setError({
           summary: t("jobOperationFailed"),

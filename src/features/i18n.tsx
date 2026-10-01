@@ -156,6 +156,8 @@ const ENGLISH = {
   saveEditedArchive: "Save edited archive as",
   editSaveDifferentPath:
     "Choose a new filename, or select overwrite to replace the current archive.",
+  editSaveExistingPath:
+    "That filename already exists. Choose a new filename to save a separate archive.",
   editSaveCopyHint:
     "Choose a new filename next. The source archive stays intact.",
   editSaveOverwriteHint:
@@ -669,6 +671,8 @@ const JAPANESE: Record<TranslationKey, string> = {
   saveEditedArchive: "編集結果を別名で保存",
   editSaveDifferentPath:
     "新しいファイル名を選択してください。元を置き換える場合は上書き保存を選択してください。",
+  editSaveExistingPath:
+    "同名のファイルがすでにあります。別名保存には新しいファイル名を選んでください。",
   editSaveCopyHint:
     "次に新しいファイル名を選択します。元アーカイブはそのまま保持します。",
   editSaveOverwriteHint:
