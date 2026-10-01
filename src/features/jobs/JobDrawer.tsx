@@ -19,6 +19,7 @@ import {
   type VerificationReport,
 } from "./api";
 import { TranslationKey, useI18n } from "../i18n";
+import { formatBytes, formatCount } from "../archive/presentation";
 import { createSingleFlightGate } from "../singleFlight";
 import styles from "./JobDrawer.module.css";
 
@@ -637,7 +638,7 @@ function JobRow({
   onViewVerification?: (jobId: string, report: VerificationReport) => void;
   onViewComparison?: (jobId: string, result: ComparisonResult) => void;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const canCancel = job.status === "queued" || job.status === "running";
   const canRetry =
     job.retryable !== false &&
@@ -652,9 +653,49 @@ function JobRow({
     job.kind,
   );
   const presentedError = job.error ? presentJobError(job, t) : undefined;
-  const progress = job.totalUnits
-    ? `${job.completedUnits} ${t("of")} ${job.totalUnits}`
-    : `${job.completedUnits}`;
+  const itemProgress =
+    job.totalUnits != null
+      ? t("jobItemProgress")
+          .replace("{completed}", formatCount(job.completedUnits, locale))
+          .replace("{total}", formatCount(job.totalUnits, locale))
+      : t("jobItemsProcessed").replace(
+          "{completed}",
+          formatCount(job.completedUnits, locale),
+        );
+  const transferJob = job.kind === "create" || job.kind === "extract";
+  const stageKeys: Record<string, TranslationKey> = {
+    preparing: "jobStagePreparing",
+    scanning: "jobStageScanning",
+    reading: "jobStageReading",
+    writing: "jobStageCreating",
+    extracting: "jobStageExtracting",
+    finalizing: "jobStageFinalizing",
+    cleaning_up: "jobStageCleaningUp",
+  };
+  const phase =
+    transferJob && ACTIVE.has(job.status)
+      ? t(stageKeys[job.phase] ?? "jobStagePreparing")
+      : undefined;
+  const progress =
+    transferJob && job.completedBytes != null
+      ? job.totalBytes != null
+        ? t("jobByteProgress")
+            .replace("{completed}", formatBytes(job.completedBytes, locale))
+            .replace("{total}", formatBytes(job.totalBytes, locale))
+        : t("jobBytesProcessed").replace(
+            "{completed}",
+            formatBytes(job.completedBytes, locale),
+          )
+      : transferJob && ACTIVE.has(job.status)
+        ? t("jobCalculatingSize")
+        : itemProgress;
+  const byteMaximum =
+    job.totalBytes != null &&
+    job.completedBytes != null &&
+    job.totalBytes > job.completedBytes &&
+    job.phase !== "finalizing"
+      ? job.totalBytes
+      : undefined;
   const status = jobStatusText(job, t);
   const detail =
     job.verificationReport?.archivePath ??
@@ -734,11 +775,23 @@ function JobRow({
             {detail}
           </span>
         )}
-        {ACTIVE.has(job.status) && job.totalUnits ? (
+        {transferJob && phase && (
+          <small className={styles.transferProgress}>
+            <span>{phase}</span>
+            <span className={styles.numeric}>{progress}</span>
+          </small>
+        )}
+        {ACTIVE.has(job.status) && (transferJob || job.totalUnits) ? (
           <progress
-            aria-label={`${status}: ${progress}`}
-            value={job.completedUnits}
-            max={job.totalUnits}
+            aria-label={`${phase ?? status}: ${progress}`}
+            value={
+              transferJob
+                ? byteMaximum
+                  ? (job.completedBytes ?? undefined)
+                  : undefined
+                : job.completedUnits
+            }
+            max={transferJob ? byteMaximum : (job.totalUnits ?? undefined)}
           />
         ) : null}
         {job.status === "cancel_requested" && (
@@ -746,7 +799,11 @@ function JobRow({
             {t("jobCancelWaiting")}
           </small>
         )}
-        {!compact && <small className={styles.numeric}>{progress}</small>}
+        {!compact && (
+          <small className={styles.numeric}>
+            {transferJob && phase ? itemProgress : progress}
+          </small>
+        )}
         {presentedError && (
           <small className={styles.error} role="alert">
             {presentedError.message}

@@ -9,6 +9,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -59,6 +60,10 @@ pub struct JobSnapshot {
     pub current_item: Option<String>,
     pub completed_units: u64,
     pub total_units: Option<u64>,
+    #[serde(default)]
+    pub completed_bytes: Option<u64>,
+    #[serde(default)]
+    pub total_bytes: Option<u64>,
     pub output_path: Option<String>,
     pub error: Option<String>,
     pub error_code: Option<String>,
@@ -416,6 +421,8 @@ impl JobManager {
             current_item: None,
             completed_units: 0,
             total_units: None,
+            completed_bytes: None,
+            total_bytes: None,
             output_path: intended_output.map(|path| path.to_string_lossy().into_owned()),
             error: None,
             error_code: None,
@@ -570,6 +577,8 @@ impl JobManager {
             record.snapshot.current_item = None;
             record.snapshot.completed_units = 0;
             record.snapshot.total_units = None;
+            record.snapshot.completed_bytes = None;
+            record.snapshot.total_bytes = None;
             record.snapshot.error = None;
             record.snapshot.error_code = None;
             record.snapshot.retryable = true;
@@ -819,17 +828,56 @@ impl JobManager {
                 }
             });
         };
+        let transfer_manager = self.clone();
+        let transfer_id = id.clone();
+        let transfer_observer = observer.clone();
+        let mut last_transfer = Instant::now();
+        let mut last_phase = "";
+        let mut last_bytes = 0;
+        let transfer = move |event: crate::operations::TransferProgress<'_>| {
+            let phase_changed = last_phase != event.phase;
+            let first_bytes = last_bytes == 0 && event.completed_bytes > 0;
+            let finished_bytes = event.total_bytes == Some(event.completed_bytes);
+            if !phase_changed
+                && !first_bytes
+                && !finished_bytes
+                && last_transfer.elapsed() < Duration::from_millis(100)
+            {
+                return;
+            }
+            last_phase = event.phase;
+            last_bytes = event.completed_bytes;
+            last_transfer = Instant::now();
+            transfer_manager.update(&transfer_id, &transfer_observer, |snapshot| {
+                if matches!(
+                    snapshot.status,
+                    JobStatus::Running | JobStatus::CancelRequested
+                ) {
+                    if snapshot.status == JobStatus::Running {
+                        snapshot.phase = event.phase.into();
+                    }
+                    snapshot.completed_bytes = Some(event.completed_bytes);
+                    snapshot.total_bytes = event
+                        .total_bytes
+                        .filter(|total| event.completed_bytes <= *total);
+                    snapshot.total_units = Some(event.total_items);
+                    snapshot.current_item = event.current_item.map(str::to_owned);
+                }
+            });
+        };
         let result = match &request {
-            JobRequest::Create(request) => crate::operations::create_archive(
+            JobRequest::Create(request) => crate::operations::create_archive_with_progress(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
+                transfer,
             )
             .map(JobExecutionOutcome::Operation),
-            JobRequest::Extract(request) => crate::operations::extract_archive(
+            JobRequest::Extract(request) => crate::operations::extract_archive_with_progress(
                 request,
                 || cancelled.load(Ordering::Acquire),
                 progress,
+                transfer,
             )
             .map(JobExecutionOutcome::Operation),
             JobRequest::Append(request) => crate::operations::append_archive(
@@ -1579,6 +1627,8 @@ mod tests {
             current_item: None,
             completed_units: 1,
             total_units: Some(1),
+            completed_bytes: None,
+            total_bytes: None,
             output_path: Some("/tmp/archive.pna".into()),
             error: None,
             error_code: None,
@@ -1588,9 +1638,13 @@ mod tests {
             comparison_report: None,
         })
         .unwrap();
+        value.as_object_mut().unwrap().remove("completedBytes");
+        value.as_object_mut().unwrap().remove("totalBytes");
         value["warnings"] = serde_json::json!(["legacy cleanup detail"]);
 
         let restored: JobSnapshot = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.completed_bytes, None);
+        assert_eq!(restored.total_bytes, None);
         assert_eq!(restored.warnings.len(), 1);
         assert_eq!(restored.warnings[0].code, "LEGACY_WARNING");
         assert_eq!(
@@ -2069,7 +2123,8 @@ mod tests {
         let temp = tempdir().unwrap();
         let source = temp.path().join("input.txt");
         let output = temp.path().join("output.pna");
-        fs::write(&source, b"job payload").unwrap();
+        let payload = vec![42_u8; 192 * 1024 + 1];
+        fs::write(&source, &payload).unwrap();
         let observed = Arc::new(Mutex::new(Vec::new()));
         let observer_values = observed.clone();
         let manager = JobManager::default();
@@ -2100,6 +2155,21 @@ mod tests {
         assert_eq!(succeeded.total_units, Some(1));
         assert_eq!(succeeded.output_path.as_deref(), output.to_str());
         assert!(output.exists());
+        assert_eq!(succeeded.completed_bytes, Some(payload.len() as u64));
+        assert_eq!(succeeded.total_bytes, Some(payload.len() as u64));
+        {
+            let snapshots = observed.lock().unwrap();
+            assert!(snapshots
+                .iter()
+                .any(|snapshot| snapshot.completed_units == 0
+                    && snapshot
+                        .completed_bytes
+                        .is_some_and(|bytes| bytes > 0 && bytes < payload.len() as u64)));
+            assert!(snapshots
+                .iter()
+                .any(|snapshot| snapshot.phase == "finalizing"
+                    && snapshot.status == JobStatus::Running));
+        }
         let states = observed
             .lock()
             .unwrap()
@@ -2114,6 +2184,40 @@ mod tests {
         );
         assert!(manager.dismiss(&queued.id).unwrap().is_empty());
         assert!(manager.list().is_empty());
+        let extraction_snapshots = Arc::new(Mutex::new(Vec::new()));
+        let capture = extraction_snapshots.clone();
+        let extract = manager
+            .start(
+                JobRequest::Extract(ExtractRequest {
+                    archive_path: output,
+                    destination: temp.path().join("extracted"),
+                    entries: Vec::new(),
+                    password: None,
+                    conflict: ConflictPolicy::Rename,
+                    restore_permissions: false,
+                    keep_completed_on_cancel: true,
+                }),
+                Arc::new(move |snapshot| capture.lock().unwrap().push(snapshot)),
+            )
+            .unwrap();
+        let extracted = wait_for_terminal(&manager, &extract.id);
+        assert_eq!(extracted.status, JobStatus::Succeeded);
+        assert_eq!(extracted.completed_bytes, Some(payload.len() as u64));
+        assert_eq!(extracted.total_bytes, Some(payload.len() as u64));
+        assert_eq!(
+            fs::read(temp.path().join("extracted/output/input.txt")).unwrap(),
+            payload
+        );
+        let snapshots = extraction_snapshots.lock().unwrap();
+        assert!(snapshots
+            .iter()
+            .any(|snapshot| snapshot.completed_units == 0
+                && snapshot
+                    .completed_bytes
+                    .is_some_and(|bytes| bytes > 0 && bytes < payload.len() as u64)));
+        assert!(snapshots.iter().any(
+            |snapshot| snapshot.phase == "finalizing" && snapshot.status == JobStatus::Running
+        ));
     }
 
     #[test]

@@ -176,14 +176,38 @@ pub struct ExtractRequest {
     pub keep_completed_on_cancel: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct TransferProgress<'a> {
+    pub phase: &'static str,
+    pub completed_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub total_items: u64,
+    pub current_item: Option<&'a str>,
+}
+
+#[cfg(test)]
 pub fn extract_archive<C, P>(
     request: &ExtractRequest,
     cancelled: C,
-    mut progress: P,
+    progress: P,
 ) -> io::Result<OperationOutcome>
 where
     C: Fn() -> bool,
     P: FnMut(u64, u64, &str),
+{
+    extract_archive_with_progress(request, cancelled, progress, |_| {})
+}
+
+pub fn extract_archive_with_progress<C, P, T>(
+    request: &ExtractRequest,
+    cancelled: C,
+    mut progress: P,
+    mut transfer: T,
+) -> io::Result<OperationOutcome>
+where
+    C: Fn() -> bool,
+    P: FnMut(u64, u64, &str),
+    T: FnMut(TransferProgress<'_>),
 {
     if request.destination.as_os_str().is_empty() {
         return Err(io::Error::new(
@@ -202,7 +226,15 @@ where
     let root = request.destination.join(root_relative);
     let canonical_root = fs::canonicalize(&root)?;
 
-    let (total, required_bytes) = preflight_extract(request)?;
+    let (total, required_bytes, total_bytes) = preflight_extract(request, &root)?;
+    let mut completed_bytes = 0_u64;
+    transfer(TransferProgress {
+        phase: "extracting",
+        completed_bytes,
+        total_bytes,
+        total_items: total,
+        current_item: None,
+    });
     ensure_space(required_bytes, fs2::available_space(&request.destination)?)?;
     let file = fs::File::open(&request.archive_path)?;
     let mut archive = Archive::read_header(file)?;
@@ -223,6 +255,13 @@ where
             if !is_selected(&relative, &request.entries) {
                 continue;
             }
+            transfer(TransferProgress {
+                phase: "extracting",
+                completed_bytes,
+                total_bytes,
+                total_items: total,
+                current_item: Some(&relative.to_string_lossy()),
+            });
             match entry.header().data_kind() {
                 libpna::DataKind::Directory => {
                     super::create_safe_directory(&root, &canonical_root, &relative)?;
@@ -270,6 +309,14 @@ where
                             }
                             writer.write_all(&buffer[..read])?;
                             digest.update(&buffer[..read]);
+                            completed_bytes = completed_bytes.saturating_add(read as u64);
+                            transfer(TransferProgress {
+                                phase: "extracting",
+                                completed_bytes,
+                                total_bytes,
+                                total_items: total,
+                                current_item: Some(&relative.to_string_lossy()),
+                            });
                         }
                         if let Some(expected_digest) = expected_digest {
                             if digest.finalize().as_slice() != expected_digest {
@@ -279,6 +326,13 @@ where
                                 ));
                             }
                         }
+                        transfer(TransferProgress {
+                            phase: "finalizing",
+                            completed_bytes,
+                            total_bytes,
+                            total_items: total,
+                            current_item: Some(&relative.to_string_lossy()),
+                        });
                         writer.sync_all()?;
                         check_cancelled(&cancelled)?;
                         let backup = if request.keep_completed_on_cancel {
@@ -354,6 +408,13 @@ where
             }
         }
     }
+    transfer(TransferProgress {
+        phase: "finalizing",
+        completed_bytes,
+        total_bytes,
+        total_items: total,
+        current_item: None,
+    });
     // Apply restrictive parent modes only after writing or rolling back their children.
     directory_permissions.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
     for (path, metadata) in directory_permissions {
@@ -368,7 +429,10 @@ where
     })
 }
 
-fn preflight_extract(request: &ExtractRequest) -> io::Result<(u64, u128)> {
+fn preflight_extract(
+    request: &ExtractRequest,
+    root: &Path,
+) -> io::Result<(u64, u128, Option<u64>)> {
     let encrypted = crate::utils::is_encrypted(&request.archive_path)?;
     if encrypted && request.password.as_deref().unwrap_or_default().is_empty() {
         return Err(io::Error::new(
@@ -381,6 +445,7 @@ fn preflight_extract(request: &ExtractRequest) -> io::Result<(u64, u128)> {
     let password = request.password.as_deref();
     let mut files = 0_u64;
     let mut required_bytes = 0_u128;
+    let mut total_bytes = Some(0_u64);
     for entry in archive.entries_with_options(&libpna::ReadOptions::with_password(
         password.map(str::as_bytes),
     )) {
@@ -392,8 +457,16 @@ fn preflight_extract(request: &ExtractRequest) -> io::Result<(u64, u128)> {
         match entry.header().data_kind() {
             libpna::DataKind::File => {
                 files += 1;
-                required_bytes = required_bytes
-                    .saturating_add(entry.metadata().raw_file_size().unwrap_or_default());
+                if !matches!(request.conflict, ConflictPolicy::Skip)
+                    || !root.join(&relative).exists()
+                {
+                    let size = entry.metadata().raw_file_size();
+                    required_bytes = required_bytes.saturating_add(size.unwrap_or_default());
+                    total_bytes = total_bytes.and_then(|total| {
+                        size.and_then(|size| u64::try_from(size).ok())
+                            .and_then(|size| total.checked_add(size))
+                    });
+                }
             }
             libpna::DataKind::Directory => {}
             libpna::DataKind::SymbolicLink | libpna::DataKind::HardLink => {
@@ -416,7 +489,7 @@ fn preflight_extract(request: &ExtractRequest) -> io::Result<(u64, u128)> {
             }
         }
     }
-    Ok((files, required_bytes))
+    Ok((files, required_bytes, total_bytes))
 }
 
 fn ensure_space(required: u128, available: u64) -> io::Result<()> {
@@ -496,14 +569,29 @@ fn restore_permissions(path: &Path, metadata: &libpna::Metadata, enabled: bool) 
     Ok(())
 }
 
+#[cfg(test)]
 pub fn create_archive<C, P>(
     request: &CreateRequest,
     cancelled: C,
-    mut progress: P,
+    progress: P,
 ) -> io::Result<OperationOutcome>
 where
     C: Fn() -> bool,
     P: FnMut(u64, u64, &str),
+{
+    create_archive_with_progress(request, cancelled, progress, |_| {})
+}
+
+pub fn create_archive_with_progress<C, P, T>(
+    request: &CreateRequest,
+    cancelled: C,
+    mut progress: P,
+    mut transfer: T,
+) -> io::Result<OperationOutcome>
+where
+    C: Fn() -> bool,
+    P: FnMut(u64, u64, &str),
+    T: FnMut(TransferProgress<'_>),
 {
     if request.sources.is_empty() {
         return Err(io::Error::new(
@@ -545,6 +633,17 @@ where
     fs::create_dir_all(parent)?;
     let entries = scan_sources(&request.sources)?;
     let total = entries.len() as u64;
+    let total_bytes = entries
+        .iter()
+        .try_fold(0_u64, |sum, entry| sum.checked_add(entry.bytes));
+    let mut completed_bytes = 0_u64;
+    transfer(TransferProgress {
+        phase: "writing",
+        completed_bytes,
+        total_bytes,
+        total_items: total,
+        current_item: None,
+    });
     let partial = unique_sibling_path(&request.output_path, "partial")?;
     let mut partial_guard = PartialFile::new(partial.clone());
     let file = OpenOptions::new()
@@ -557,25 +656,67 @@ where
         let mut archive = Archive::write_solid_header(file, options)?;
         for (offset, entry) in entries.iter().enumerate() {
             check_cancelled(&cancelled)?;
-            archive.add_entry(build_scanned_entry(entry, &request.options)?)?;
+            archive.add_entry(build_scanned_entry_with_progress(
+                entry,
+                &request.options,
+                &cancelled,
+                |read| {
+                    completed_bytes = completed_bytes.saturating_add(read);
+                    transfer(TransferProgress {
+                        phase: "writing",
+                        completed_bytes,
+                        total_bytes,
+                        total_items: total,
+                        current_item: Some(&entry.archive_path.to_string_lossy()),
+                    });
+                },
+            )?)?;
             progress(
                 offset as u64 + 1,
                 total,
                 &entry.archive_path.to_string_lossy(),
             );
         }
+        transfer(TransferProgress {
+            phase: "finalizing",
+            completed_bytes,
+            total_bytes,
+            total_items: total,
+            current_item: None,
+        });
         archive.finalize()
     } else {
         let mut archive = Archive::write_header(file)?;
         for (offset, entry) in entries.iter().enumerate() {
             check_cancelled(&cancelled)?;
-            archive.add_entry(build_scanned_entry(entry, &request.options)?)?;
+            archive.add_entry(build_scanned_entry_with_progress(
+                entry,
+                &request.options,
+                &cancelled,
+                |read| {
+                    completed_bytes = completed_bytes.saturating_add(read);
+                    transfer(TransferProgress {
+                        phase: "writing",
+                        completed_bytes,
+                        total_bytes,
+                        total_items: total,
+                        current_item: Some(&entry.archive_path.to_string_lossy()),
+                    });
+                },
+            )?)?;
             progress(
                 offset as u64 + 1,
                 total,
                 &entry.archive_path.to_string_lossy(),
             );
         }
+        transfer(TransferProgress {
+            phase: "finalizing",
+            completed_bytes,
+            total_bytes,
+            total_items: total,
+            current_item: None,
+        });
         archive.finalize()
     };
 
@@ -1690,6 +1831,7 @@ struct ScannedEntry {
     source_path: PathBuf,
     archive_path: PathBuf,
     directory: bool,
+    bytes: u64,
 }
 
 fn scan_sources(sources: &[PathBuf]) -> io::Result<Vec<ScannedEntry>> {
@@ -1739,6 +1881,7 @@ fn scan_source(
             source_path: source.to_path_buf(),
             archive_path: archive_path.clone(),
             directory: true,
+            bytes: 0,
         });
         let mut children = fs::read_dir(source)?.collect::<Result<Vec<_>, _>>()?;
         children.sort_by_key(|entry| entry.file_name());
@@ -1755,6 +1898,7 @@ fn scan_source(
             source_path: source.to_path_buf(),
             archive_path,
             directory: false,
+            bytes: metadata.len(),
         });
     } else {
         return Err(io::Error::new(
@@ -1766,6 +1910,15 @@ fn scan_source(
 }
 
 fn build_scanned_entry(scanned: &ScannedEntry, options: &CreateOptions) -> io::Result<NormalEntry> {
+    build_scanned_entry_with_progress(scanned, options, &|| false, |_| {})
+}
+
+fn build_scanned_entry_with_progress(
+    scanned: &ScannedEntry,
+    options: &CreateOptions,
+    cancelled: &impl Fn() -> bool,
+    mut progress: impl FnMut(u64),
+) -> io::Result<NormalEntry> {
     let name = EntryName::try_from(scanned.archive_path.as_path())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     if scanned.directory {
@@ -1784,12 +1937,14 @@ fn build_scanned_entry(scanned: &ScannedEntry, options: &CreateOptions) -> io::R
         let mut digest = Sha256::new();
         let mut buffer = [0_u8; 64 * 1024];
         loop {
+            check_cancelled(cancelled)?;
             let read = std::io::Read::read(&mut source, &mut buffer)?;
             if read == 0 {
                 break;
             }
             builder.write_all(&buffer[..read])?;
             digest.update(&buffer[..read]);
+            progress(read as u64);
         }
         builder.add_extra_chunk(RawChunk::from_data(
             plaintext_digest_chunk_type(),
@@ -2031,6 +2186,117 @@ mod tests {
             archive.add_entry(entry.build().unwrap()).unwrap();
         }
         archive.finalize().unwrap();
+    }
+
+    #[test]
+    fn transfer_progress_handles_selected_skipped_and_cancelled_files() {
+        for solid in [false, true] {
+            let temp = tempdir().unwrap();
+            let input = temp.path().join("input");
+            fs::create_dir(&input).unwrap();
+            let payload = vec![7_u8; 192 * 1024 + 1];
+            fs::write(input.join("large.bin"), &payload).unwrap();
+            fs::write(input.join("other.txt"), b"other").unwrap();
+            let archive_path = temp.path().join("data.pna");
+            let mut options = standard_options();
+            options.solid = solid;
+            create_archive(
+                &CreateRequest {
+                    sources: vec![input.clone()],
+                    output_path: archive_path.clone(),
+                    overwrite: false,
+                    options: options.clone(),
+                },
+                || false,
+                |_, _, _| {},
+            )
+            .unwrap();
+            let mut request = ExtractRequest {
+                archive_path,
+                destination: temp.path().join("restored"),
+                entries: vec!["input/large.bin".into()],
+                password: None,
+                conflict: ConflictPolicy::Rename,
+                restore_permissions: false,
+                keep_completed_on_cancel: true,
+            };
+            let mut events = Vec::new();
+            extract_archive_with_progress(
+                &request,
+                || false,
+                |_, _, _| {},
+                |event| events.push((event.phase, event.completed_bytes, event.total_bytes)),
+            )
+            .unwrap();
+            assert!(events.iter().any(|(_, bytes, total)| *bytes > 0
+                && *bytes < payload.len() as u64
+                && *total == Some(payload.len() as u64)));
+            assert!(events.windows(2).all(|pair| pair[0].1 <= pair[1].1));
+            assert_eq!(
+                events.last(),
+                Some(&(
+                    "finalizing",
+                    payload.len() as u64,
+                    Some(payload.len() as u64)
+                ))
+            );
+            assert_eq!(
+                fs::read(request.destination.join("data/input/large.bin")).unwrap(),
+                payload
+            );
+            assert!(!request.destination.join("data/input/other.txt").exists());
+            request.conflict = ConflictPolicy::Skip;
+            let mut skipped = Vec::new();
+            extract_archive_with_progress(
+                &request,
+                || false,
+                |_, _, _| {},
+                |event| skipped.push((event.completed_bytes, event.total_bytes)),
+            )
+            .unwrap();
+            assert!(skipped.iter().all(|event| *event == (0, Some(0))));
+
+            let cancelled = std::sync::atomic::AtomicBool::new(false);
+            let cancelled_output = temp.path().join("cancelled.pna");
+            let error = create_archive_with_progress(
+                &CreateRequest {
+                    sources: vec![input],
+                    output_path: cancelled_output.clone(),
+                    overwrite: false,
+                    options,
+                },
+                || cancelled.load(Ordering::Relaxed),
+                |_, _, _| {},
+                |event| {
+                    if event.completed_bytes > 0 {
+                        cancelled.store(true, Ordering::Relaxed);
+                    }
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+            assert!(!cancelled_output.exists());
+            assert!(fs::read_dir(temp.path()).unwrap().all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("partial")));
+            cancelled.store(false, Ordering::Relaxed);
+            request.destination = temp.path().join("cancelled-extract");
+            let error = extract_archive_with_progress(
+                &request,
+                || cancelled.load(Ordering::Relaxed),
+                |_, _, _| {},
+                |event| {
+                    if event.completed_bytes > 0 {
+                        cancelled.store(true, Ordering::Relaxed);
+                    }
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+            assert!(!request.destination.join("data/input/large.bin").exists());
+        }
     }
 
     #[test]

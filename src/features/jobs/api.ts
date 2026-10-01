@@ -115,6 +115,8 @@ export interface JobSnapshot {
   currentItem?: string | null;
   completedUnits: number;
   totalUnits?: number | null;
+  completedBytes?: number | null;
+  totalBytes?: number | null;
   outputPath?: string | null;
   error?: string | null;
   errorCode?: string | null;
