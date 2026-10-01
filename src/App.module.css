@@ -1128,6 +1128,17 @@
 }
 
 @media (max-width: 900px) {
+  .workspace > .inspector,
+  .browserWorkspace > .inspector {
+    display: none;
+  }
+
+  .workspace,
+  .browserWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
   .brandButton {
     max-width: 44px;
   }
@@ -1177,18 +1188,8 @@
     display: none;
   }
 
-  .workspace,
-  .browserWorkspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .actionGrid {
     grid-template-columns: 1fr;
-  }
-
-  .workspace > .inspector,
-  .browserWorkspace > .inspector {
-    display: none;
   }
 }
 .extractForm {
