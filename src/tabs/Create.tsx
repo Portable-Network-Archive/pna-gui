@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { ArchiveIcon, Cross1Icon, FileIcon } from "@radix-ui/react-icons";
 import { Button } from "@radix-ui/themes";
@@ -62,26 +62,69 @@ const PRESETS: Record<Preset, Settings> = {
   },
 };
 
-export default function Create() {
-  const { t } = useI18n();
+export function useCreationDraft() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [sources, setSources] = useState<string[]>([]);
   const [configuration, setConfiguration] = useState<{
     preset: PresetSelection;
     settings: Settings;
   }>({ preset: "standard", settings: PRESETS.standard });
-  const { preset, settings } = configuration;
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [overwrite, setOverwrite] = useState(false);
+  return {
+    step,
+    setStep,
+    sources,
+    setSources,
+    configuration,
+    setConfiguration,
+    password,
+    setPassword,
+    passwordConfirmation,
+    setPasswordConfirmation,
+    overwrite,
+    setOverwrite,
+  };
+}
+
+export default function Create() {
+  const draft = useCreationDraft();
+  return <CreateWizard draft={draft} />;
+}
+
+export function CreateWizard({
+  draft,
+}: {
+  draft: ReturnType<typeof useCreationDraft>;
+}) {
+  const { t } = useI18n();
+  const {
+    step,
+    setStep,
+    sources,
+    setSources,
+    configuration,
+    setConfiguration,
+    password,
+    setPassword,
+    passwordConfirmation,
+    setPasswordConfirmation,
+    overwrite,
+    setOverwrite,
+  } = draft;
+  const { preset, settings } = configuration;
   const [draggingOver, setDraggingOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<{ summary: string; detail?: string }>();
   const [queuedJob, setQueuedJob] = useState<string>();
   const actionGate = useMemo(createSingleFlightGate, []);
-  const addSources = (paths: string[]) => {
-    setSources((current) => [...new Set([...current, ...paths])]);
-  };
+  const addSources = useCallback(
+    (paths: string[]) => {
+      setSources((current) => [...new Set([...current, ...paths])]);
+    },
+    [setSources],
+  );
 
   const chooseFiles = () =>
     actionGate.run("source-picker", async () => {
@@ -117,15 +160,19 @@ export default function Create() {
     void import("@tauri-apps/api/webviewWindow")
       .then(async ({ getCurrentWebviewWindow }) => {
         if (disposed) return;
-        unlisten = await getCurrentWebviewWindow().onDragDropEvent((event) => {
-          if (event.payload.type === "enter" || event.payload.type === "over")
-            setDraggingOver(true);
-          if (event.payload.type === "leave") setDraggingOver(false);
-          if (event.payload.type === "drop") {
-            setDraggingOver(false);
-            addSources(event.payload.paths);
-          }
-        });
+        const stopListening = await getCurrentWebviewWindow().onDragDropEvent(
+          (event) => {
+            if (event.payload.type === "enter" || event.payload.type === "over")
+              setDraggingOver(true);
+            if (event.payload.type === "leave") setDraggingOver(false);
+            if (event.payload.type === "drop") {
+              setDraggingOver(false);
+              addSources(event.payload.paths);
+            }
+          },
+        );
+        if (disposed) stopListening();
+        else unlisten = stopListening;
       })
       .catch(() => {
         if (!disposed) setError({ summary: t("jobSyncFailed") });
@@ -134,7 +181,7 @@ export default function Create() {
       disposed = true;
       unlisten?.();
     };
-  }, [t]);
+  }, [addSources, t]);
 
   const validation = useMemo(() => {
     if (settings.reproducible && settings.encryption !== "none")
