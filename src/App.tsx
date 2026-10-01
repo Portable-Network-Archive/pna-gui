@@ -1172,7 +1172,10 @@ function BrowserView({
   };
 
   return (
-    <div className={styles.shell} data-testid="archive-browser">
+    <div
+      className={`${styles.shell} ${styles.browserShell}`}
+      data-testid="archive-browser"
+    >
       <header className={styles.toolbar}>
         <button
           className={styles.brandButton}
@@ -1215,7 +1218,11 @@ function BrowserView({
           }}
         >
           <DownloadIcon aria-hidden="true" />
-          <span className={styles.toolbarLabel}>{t("extract")}</span>
+          <span
+            className={`${styles.toolbarLabel} ${styles.toolbarLabelPersistent}`}
+          >
+            {t("extract")}
+          </span>
         </button>
         <button
           className={`${styles.toolbarButton} ${styles.toolbarButtonPersistent}`}
