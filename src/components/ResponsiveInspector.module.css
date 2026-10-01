@@ -1,0 +1,48 @@
+.trigger {
+  justify-self: end;
+  margin: 6px 14px;
+  padding: 7px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 5px;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 13px;
+  background: var(--app-panel);
+  cursor: pointer;
+}
+.trigger:hover {
+  background: var(--app-hover);
+}
+.trigger:focus-visible,
+.close:focus-visible {
+  outline: 2px solid var(--app-blue);
+  outline-offset: 2px;
+}
+.panelContent {
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
+}
+.heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--app-text);
+  background: transparent;
+  cursor: pointer;
+}
+.panelContent .panelBody {
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}

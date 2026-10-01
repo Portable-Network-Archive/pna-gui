@@ -83,6 +83,7 @@ import ComparisonView from "./features/comparison/ComparisonView";
 import VerificationDialog from "./features/verification/VerificationDialog";
 import VerificationResultsDialog from "./features/verification/VerificationResultsDialog";
 import UpdateDialog from "./features/updates/UpdateDialog";
+import ResponsiveInspector from "./components/ResponsiveInspector";
 import { useArchiveEditSave } from "./features/archive/ArchiveEditSaveChoice";
 
 registerE2eBridge();
@@ -821,7 +822,10 @@ function HomeView({
           </section>
         </main>
 
-        <aside className={styles.inspector} aria-label={t("selectedArchive")}>
+        <ResponsiveInspector
+          className={styles.inspector}
+          label={t("selectedArchive")}
+        >
           <h2>{t("selectedArchive")}</h2>
           {selected ? (
             <div className={styles.summaryInspector}>
@@ -857,7 +861,7 @@ function HomeView({
               <p>{t("selectArchiveHint")}</p>
             </div>
           )}
-        </aside>
+        </ResponsiveInspector>
       </div>
     </div>
   );
@@ -2720,7 +2724,7 @@ function Inspector({
 }) {
   const { locale, t } = useI18n();
   return (
-    <aside className={styles.inspector} aria-label={t("inspector")}>
+    <ResponsiveInspector className={styles.inspector} label={t("inspector")}>
       <h2>{details ? t("selectedItem") : t("archiveInformation")}</h2>
       {details ? (
         <div className={styles.entryInspector}>
@@ -2822,7 +2826,7 @@ function Inspector({
           <p className={styles.inspectorHint}>{t("selectItemHint")}</p>
         </div>
       )}
-    </aside>
+    </ResponsiveInspector>
   );
 }
 
