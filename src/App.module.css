@@ -15,17 +15,25 @@
   height: 100dvh;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
   color: var(--app-text);
   background: #eef1f5;
 }
 
 .shell {
+  min-width: 0;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
   height: 100%;
   background: var(--app-panel);
+}
+
+.browserShell {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .toolbar {
@@ -722,6 +730,7 @@
 }
 
 .searchBox {
+  min-width: 0;
   display: flex;
   align-items: center;
   width: min(360px, 34vw);
@@ -1183,6 +1192,15 @@
 }
 
 @media (max-width: 760px) {
+  .toolbarLabel:not(.toolbarLabelPersistent) {
+    display: none;
+  }
+
+  .searchBox {
+    flex: 1;
+    min-width: 0;
+  }
+
   .sidebar,
   .treeSidebar {
     display: none;
@@ -1324,4 +1342,14 @@
 }
 .selectionCell > .fileIdentity {
   flex: 1;
+}
+
+@media (max-height: 500px) {
+  .browserMain {
+    overflow: auto;
+  }
+
+  .browserMain > .listPanel {
+    flex: 1 0 180px;
+  }
 }
