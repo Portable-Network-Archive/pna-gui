@@ -37,7 +37,7 @@ import {
   open as openDialog,
   save as saveDialog,
 } from "@tauri-apps/plugin-dialog";
-import { Create } from "./tabs";
+import { CreateWizard, useCreationDraft } from "./tabs/Create";
 import { registerE2eBridge } from "@pna/e2e-bridge";
 import { archiveApi, normalizeAppError } from "./features/archive/api";
 import { createSingleFlightGate } from "./features/singleFlight";
@@ -105,6 +105,7 @@ export default function App() {
 function AppContent() {
   const { t } = useI18n();
   const [view, setView] = useState<AppView>("home");
+  const creationDraft = useCreationDraft();
   const [bootstrap, setBootstrap] = useState<BootstrapSnapshot>({
     productName: "Portable Network Archive",
     recent: [],
@@ -489,7 +490,7 @@ function AppContent() {
             </div>
           </header>
           <div className={styles.legacyContent}>
-            <Create />
+            <CreateWizard draft={creationDraft} />
           </div>
         </div>
       )}

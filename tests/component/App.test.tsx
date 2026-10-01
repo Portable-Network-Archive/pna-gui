@@ -1846,6 +1846,55 @@ describe("application shell", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("retains the creation draft across navigation and resets it for a new app session", async () => {
+    const user = userEvent.setup();
+    installInvokeHandler({ recentItems: [recent] });
+    const mounted = renderApp();
+    await screen.findByRole("heading", { name: "Recent archives" });
+    await user.keyboard("{Control>}n{/Control}");
+    bridge.openDialog.mockResolvedValueOnce(["/tmp/draft.txt"]);
+    await user.click(screen.getByRole("button", { name: "Add files" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.selectOptions(screen.getByLabelText("Compression"), "xz");
+    await user.selectOptions(screen.getByLabelText("Encryption"), "aes");
+    await user.type(screen.getByLabelText("Password"), "session-secret");
+    await user.type(
+      screen.getByLabelText("Confirm password"),
+      "session-secret",
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    const overwrite = screen.getByRole("checkbox");
+    await user.click(overwrite);
+    await user.click(screen.getByRole("button", { name: "Back to Home" }));
+    expect(
+      screen.queryByRole("region", { name: "Create archive wizard" }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("button", {
+        name: /^demo\.pna \/tmp\/demo\.pna$/,
+      }),
+    );
+    await screen.findByTestId("archive-browser");
+    await user.keyboard("{Control>}n{/Control}");
+    expect(screen.getByRole("checkbox")).toBeChecked();
+    expect(screen.getByText("xz")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Back", exact: true }));
+    expect(screen.getByLabelText("Encryption")).toHaveValue("aes");
+    expect(screen.getByLabelText("Compression")).toHaveValue("xz");
+    expect(screen.getByLabelText("Password")).toHaveValue("session-secret");
+    expect(screen.getByLabelText("Confirm password")).toHaveValue(
+      "session-secret",
+    );
+    await user.click(screen.getByRole("button", { name: "Back", exact: true }));
+    expect(screen.getByText("/tmp/draft.txt")).toBeVisible();
+    mounted.unmount();
+    renderApp();
+    await screen.findByRole("heading", { name: "Recent archives" });
+    await user.keyboard("{Control>}n{/Control}");
+    expect(screen.getByText("No files or folders selected.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
   it("preserves a creation draft when an edit to the retained archive finishes", async () => {
     await openRecentArchive();
     await userEvent.keyboard("{Control>}n{/Control}");
