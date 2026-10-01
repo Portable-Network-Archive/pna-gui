@@ -35,6 +35,8 @@ const running: JobSnapshot = {
   currentItem: "docs/readme.txt",
   completedUnits: 1,
   totalUnits: 4,
+  completedBytes: 1024,
+  totalBytes: 4096,
 };
 
 const completed: JobSnapshot = {
@@ -72,7 +74,7 @@ describe("background job drawer", () => {
     });
     expect(
       within(drawer).getByRole("progressbar", {
-        name: "In Progress: 1 of 4",
+        name: "Processing files: 1 KB of 4 KB processed",
       }),
     ).toBeVisible();
     await userEvent.click(
@@ -93,6 +95,56 @@ describe("background job drawer", () => {
     expect(screen.getByText("disk full")).not.toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Retry job" }));
     expect(bridge.invoke).toHaveBeenCalledWith("job_retry", { jobId: "job-1" });
+  });
+
+  it("shows byte progress and the finalization stage without claiming output is complete", async () => {
+    render(
+      <I18nProvider>
+        <JobDrawer />
+      </I18nProvider>,
+    );
+    const drawer = await screen.findByRole("region", {
+      name: "Background jobs",
+    });
+    const progress = within(drawer).getByRole("progressbar");
+    expect(progress).toHaveAttribute("value", "1024");
+    expect(progress).toHaveAttribute("max", "4096");
+    act(() =>
+      bridge.jobHandler?.({
+        payload: { ...running, completedBytes: 4096, phase: "finalizing" },
+      }),
+    );
+    expect(within(drawer).getByText("Finalizing output")).toBeVisible();
+    expect(within(drawer).getByRole("progressbar")).not.toHaveAttribute(
+      "value",
+    );
+    expect(within(drawer).queryByText("Completed")).not.toBeInTheDocument();
+    act(() =>
+      bridge.jobHandler?.({
+        payload: {
+          ...running,
+          kind: "extract",
+          phase: "extracting",
+          totalBytes: null,
+        },
+      }),
+    );
+    expect(within(drawer).getByText("1 KB processed")).toBeVisible();
+    expect(within(drawer).getByRole("progressbar")).not.toHaveAttribute(
+      "value",
+    );
+    act(() =>
+      bridge.jobHandler?.({
+        payload: { ...running, completedBytes: 0, totalBytes: 0 },
+      }),
+    );
+    expect(within(drawer).getByText("0 B of 0 B processed")).toBeVisible();
+    expect(within(drawer).getByRole("progressbar")).not.toHaveAttribute(
+      "value",
+    );
+    await userEvent.click(screen.getByTestId("job-center-open"));
+    const center = screen.getByRole("dialog", { name: "Job center" });
+    expect(within(center).getByText("1 of 4 items")).toBeVisible();
   });
 
   it("[UI-JOB-TERMINAL-ANNOUNCEMENT] announces a completed job from an always-mounted status region", async () => {
