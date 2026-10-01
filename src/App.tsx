@@ -930,8 +930,8 @@ function BrowserView({
   const [appendOpen, setAppendOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const renameSave = useArchiveEditSave(archive.summary.path);
-  const deleteSave = useArchiveEditSave(archive.summary.path);
+  const renameSave = useArchiveEditSave(archive.summary.path, renameOpen);
+  const deleteSave = useArchiveEditSave(archive.summary.path, deleteOpen);
   const [renameValue, setRenameValue] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const editPasswordRequired =
@@ -2192,7 +2192,7 @@ function AppendDialog({
   onCloseAutoFocus?: (event: Event) => void;
 }) {
   const { t } = useI18n();
-  const editSave = useArchiveEditSave(archive.summary.path);
+  const editSave = useArchiveEditSave(archive.summary.path, open);
   const [sources, setSources] = useState<string[]>([]);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);

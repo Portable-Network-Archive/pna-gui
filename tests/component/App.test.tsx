@@ -146,6 +146,8 @@ function installInvokeHandler(options?: {
           )
             return options.openResults[args.path];
           return { handle: summary.handle, summary };
+        case "archive_output_exists":
+          return false;
         case "archive_close":
           return undefined;
         case "archive_children":
@@ -714,22 +716,46 @@ describe("application shell", () => {
     );
   });
 
-  it("[UI-UPDATE-RENAME-FLOW] names the selected entry and keeps invalid input in place", async () => {
+  it("[UI-UPDATE-RENAME-FLOW] resets cancelled overwrite choices and rejects an existing copy before queuing", async () => {
     bridge.saveDialog.mockResolvedValue("/tmp/demo-edited.pna");
     await openRecentArchive();
     await userEvent.click(
       await screen.findByRole("row", { name: /src Folder/ }),
     );
-    await userEvent.click(screen.getByRole("button", { name: "More" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const openRename = async () => {
+      await userEvent.click(screen.getByRole("button", { name: "More" }));
+      await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    };
+    await openRename();
+    await userEvent.selectOptions(
+      screen.getByLabelText("Save edited archive"),
+      "overwrite",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await openRename();
+    expect(screen.getByLabelText("Save edited archive")).toHaveValue("copy");
     const input = screen.getByRole("textbox", { name: "New name" });
     await userEvent.clear(input);
     await userEvent.type(input, "manual");
+    bridge.invoke.mockResolvedValueOnce(true);
     await userEvent.click(screen.getByRole("button", { name: "Rename Item" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That filename already exists",
+    );
+    expect(bridge.invoke).not.toHaveBeenCalledWith(
+      "job_start_rename_entry",
+      expect.anything(),
+    );
+    expect(input).toHaveValue("manual");
+    bridge.saveDialog.mockResolvedValue("/tmp/another-name");
+    await userEvent.click(screen.getByRole("button", { name: "Rename Item" }));
+    expect(bridge.invoke).toHaveBeenCalledWith("archive_output_exists", {
+      path: "/tmp/another-name.pna",
+    });
     expect(bridge.invoke).toHaveBeenCalledWith("job_start_rename_entry", {
       request: {
         archivePath: recent.path,
-        outputPath: "/tmp/demo-edited.pna",
+        outputPath: "/tmp/another-name.pna",
         sourcePath: "src",
         destinationPath: "manual",
         password: null,
@@ -1926,6 +1952,48 @@ describe("application shell", () => {
     await userEvent.click(screen.getByRole("button", { name: "Extract" }));
     const extract = screen.getByRole("dialog", { name: "Extract archive" });
     expect(within(extract).getByLabelText("Password")).toHaveValue("secret");
+  });
+
+  it("preserves a newer creation draft when an earlier submission acknowledges after navigation", async () => {
+    const user = userEvent.setup();
+    installInvokeHandler({ recentItems: [recent] });
+    const originalInvoke = bridge.invoke.getMockImplementation()!;
+    let resolveSubmission!: (value: unknown) => void;
+    bridge.invoke.mockImplementation((command: string, args: unknown) =>
+      command === "job_start_create"
+        ? new Promise((resolve) => {
+            resolveSubmission = resolve;
+          })
+        : originalInvoke(command, args),
+    );
+    renderApp();
+    await screen.findByRole("heading", { name: "Recent archives" });
+    await user.keyboard("{Control>}n{/Control}");
+    bridge.openDialog.mockResolvedValueOnce(["/tmp/old.txt"]);
+    await user.click(screen.getByRole("button", { name: "Add files" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    bridge.saveDialog.mockResolvedValueOnce("/tmp/old.pna");
+    await user.click(screen.getByRole("button", { name: "Start creating" }));
+    await user.click(screen.getByRole("button", { name: "Back to Home" }));
+    await user.keyboard("{Control>}n{/Control}");
+    expect(screen.getByRole("button", { name: "Starting…" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Back", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Back", exact: true }));
+    bridge.openDialog.mockResolvedValueOnce(["/tmp/new.txt"]);
+    await user.click(screen.getByRole("button", { name: "Add files" }));
+    await screen.findByText("/tmp/new.txt");
+    await act(async () =>
+      resolveSubmission({ id: "old-job", status: "queued" }),
+    );
+    expect(screen.getByText("/tmp/new.txt")).toBeVisible();
+    expect(screen.getByText("/tmp/old.txt")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) => command === "job_start_create",
+      ),
+    ).toHaveLength(1);
   });
 
   it("retains the creation draft across navigation and resets it for a new app session", async () => {
