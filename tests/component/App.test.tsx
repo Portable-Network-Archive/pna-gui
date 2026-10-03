@@ -14,20 +14,23 @@ import type { JobSnapshot } from "../../src/features/jobs/api";
 
 const bridge = vi.hoisted(() => ({
   invoke: vi.fn(),
+  isTauri: vi.fn(() => false),
   getMatches: vi.fn(),
   openDialog: vi.fn(),
   saveDialog: vi.fn(),
   dragHandler: undefined as ((event: DragDropEvent) => void) | undefined,
   dragHandlers: [] as Array<(event: DragDropEvent) => void>,
   menuHandler: undefined as
-    | ((event: { payload: "extract" | "create" }) => void)
-    | undefined,
+    ((event: { payload: "extract" | "create" }) => void) | undefined,
   updateHandler: undefined as (() => void) | undefined,
   jobHandlers: [] as Array<(event: { payload: JobSnapshot }) => void>,
   setZoom: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: bridge.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: bridge.invoke,
+  isTauri: bridge.isTauri,
+}));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ setZoom: bridge.setZoom }),
 }));
@@ -136,6 +139,10 @@ function installInvokeHandler(options?: {
             productName: "Portable Network Archive",
             recent: options?.recentItems ?? [],
           };
+        case "send_to_status":
+          return false;
+        case "set_send_to_enabled":
+          return args?.enabled === true;
         case "recent_remove":
           return [];
         case "archive_open":
@@ -244,6 +251,7 @@ describe("application shell", () => {
   beforeEach(() => {
     setLanguages("en-US");
     bridge.invoke.mockReset();
+    bridge.isTauri.mockReset().mockReturnValue(false);
     bridge.getMatches
       .mockReset()
       .mockResolvedValue({ args: { source: { value: null } } });
@@ -256,6 +264,60 @@ describe("application shell", () => {
     bridge.updateHandler = undefined;
     bridge.setZoom.mockReset().mockResolvedValue(undefined);
     document.documentElement.lang = "en";
+  });
+
+  it("registers and removes both Windows Send to shortcuts", async () => {
+    bridge.isTauri.mockReturnValue(true);
+    await renderHome();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add to Send to" }),
+    );
+    await screen.findByRole("button", { name: "Remove from Send to" });
+    expect(bridge.invoke).toHaveBeenCalledWith("set_send_to_enabled", {
+      enabled: true,
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove from Send to" }),
+    );
+    await screen.findByRole("button", { name: "Add to Send to" });
+    expect(bridge.invoke).toHaveBeenCalledWith("set_send_to_enabled", {
+      enabled: false,
+    });
+  });
+
+  it("preloads every selected source from the Send to create shortcut", async () => {
+    bridge.getMatches.mockResolvedValue({
+      args: {
+        create: { value: true },
+        source: { value: ["/tmp/first.txt", "/tmp/a folder/second.txt"] },
+      },
+    });
+    installInvokeHandler();
+    renderApp();
+
+    expect(
+      await screen.findByRole("region", { name: "Create archive wizard" }),
+    ).toBeVisible();
+    expect(await screen.findByText("/tmp/first.txt")).toBeVisible();
+    expect(screen.getByText("/tmp/a folder/second.txt")).toBeVisible();
+  });
+
+  it("opens the extraction dialog from the Send to extract shortcut", async () => {
+    bridge.getMatches.mockResolvedValue({
+      args: { extract: { value: true }, source: { value: [recent.path] } },
+    });
+    installInvokeHandler();
+    renderApp();
+
+    expect(
+      await screen.findByRole("dialog", { name: "Extract archive" }),
+    ).toBeVisible();
+    expect(bridge.invoke).toHaveBeenCalledWith("archive_open", {
+      path: recent.path,
+      password: undefined,
+    });
   });
 
   it("[UI-VERIFY-BROWSER-ENTRY] starts factual verification from the archive toolbar", async () => {

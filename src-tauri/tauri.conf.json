@@ -34,9 +34,18 @@
       "description": "CLI",
       "args": [
         {
+          "name": "create",
+          "short": "c"
+        },
+        {
+          "name": "extract",
+          "short": "x"
+        },
+        {
           "name": "source",
           "index": 1,
-          "takesValue": true
+          "takesValue": true,
+          "multiple": true
         }
       ]
     },

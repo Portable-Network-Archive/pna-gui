@@ -266,6 +266,34 @@
   margin-bottom: 18px;
 }
 
+.sendToPanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  background: #fafbfc;
+}
+
+.sendToPanel h2 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.sendToPanel p {
+  margin: 4px 0 0;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sendToPanel .sendToError {
+  color: var(--app-danger, #b42318);
+}
+
 .actionCard {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

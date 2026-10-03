@@ -15,6 +15,12 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+#[cfg(windows)]
+use std::{env, process::Command};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -47,6 +53,133 @@ fn archive_output_exists(path: String) -> Result<bool, String> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error.to_string()),
     }
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn send_to_status() -> Result<Option<bool>, String> {
+    let (create, extract) = send_to_shortcut_paths()?;
+    Ok(Some(create.is_file() && extract.is_file()))
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn send_to_status() -> Result<Option<bool>, String> {
+    Ok(None)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn set_send_to_enabled(enabled: bool) -> Result<Option<bool>, String> {
+    let (create, extract) = send_to_shortcut_paths()?;
+    if enabled {
+        install_send_to_shortcuts(&create, &extract)?;
+    } else {
+        remove_send_to_shortcuts(&create, &extract)?;
+    }
+    Ok(Some(enabled))
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn set_send_to_enabled(enabled: bool) -> Result<Option<bool>, String> {
+    let _ = enabled;
+    Ok(None)
+}
+
+#[cfg(windows)]
+fn send_to_shortcut_paths() -> Result<(PathBuf, PathBuf), String> {
+    let app_data = env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .ok_or_else(|| "the current user's roaming app data folder is unavailable".to_string())?;
+    let send_to = app_data.join("Microsoft").join("Windows").join("SendTo");
+    Ok((
+        send_to.join("Create PNA archive.lnk"),
+        send_to.join("Extract PNA archive.lnk"),
+    ))
+}
+
+#[cfg(windows)]
+fn install_send_to_shortcuts(create: &Path, extract: &Path) -> Result<(), String> {
+    const CREATE_SHORTCUTS_SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+$shell = New-Object -ComObject WScript.Shell
+$create = $shell.CreateShortcut($env:PNA_GUI_CREATE_SHORTCUT)
+$create.TargetPath = $env:PNA_GUI_EXECUTABLE
+$create.Arguments = '--create'
+$create.WorkingDirectory = $env:PNA_GUI_WORKING_DIRECTORY
+$create.IconLocation = "$($env:PNA_GUI_EXECUTABLE),0"
+$create.Save()
+$extract = $shell.CreateShortcut($env:PNA_GUI_EXTRACT_SHORTCUT)
+$extract.TargetPath = $env:PNA_GUI_EXECUTABLE
+$extract.Arguments = '--extract'
+$extract.WorkingDirectory = $env:PNA_GUI_WORKING_DIRECTORY
+$extract.IconLocation = "$($env:PNA_GUI_EXECUTABLE),0"
+$extract.Save()
+"#;
+
+    fs::create_dir_all(
+        create
+            .parent()
+            .ok_or_else(|| "the Windows Send To folder has no parent folder".to_string())?,
+    )
+    .map_err(|error| format!("could not access the Windows Send To folder: {error}"))?;
+    let executable = env::current_exe()
+        .map_err(|error| format!("could not locate the application executable: {error}"))?;
+    let working_directory = executable
+        .parent()
+        .ok_or_else(|| "the application executable has no parent folder".to_string())?;
+    let powershell = env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .map(|root| {
+            root.join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe")
+        })
+        .ok_or_else(|| "the Windows PowerShell executable could not be located".to_string())?;
+    let output = Command::new(powershell)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            CREATE_SHORTCUTS_SCRIPT,
+        ])
+        .env("PNA_GUI_EXECUTABLE", &executable)
+        .env("PNA_GUI_WORKING_DIRECTORY", working_directory)
+        .env("PNA_GUI_CREATE_SHORTCUT", create)
+        .env("PNA_GUI_EXTRACT_SHORTCUT", extract)
+        .creation_flags(0x08000000)
+        .output()
+        .map_err(|error| format!("could not create Windows Send To shortcuts: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let _ = remove_send_to_shortcuts(create, extract);
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if detail.is_empty() {
+            "Windows could not create the Send To shortcuts".to_string()
+        } else {
+            format!("Windows could not create the Send To shortcuts: {detail}")
+        })
+    }
+}
+
+#[cfg(windows)]
+fn remove_send_to_shortcuts(create: &Path, extract: &Path) -> Result<(), String> {
+    for shortcut in [create, extract] {
+        match fs::remove_file(shortcut) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "could not remove Windows Send To shortcut {}: {error}",
+                    shortcut.display()
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -852,6 +985,8 @@ pub fn run() {
             job_retry,
             job_dismiss,
             job_reveal_output,
+            send_to_status,
+            set_send_to_enabled,
             reader::app_bootstrap,
             reader::recent_remove,
             reader::archive_open,
@@ -1199,6 +1334,57 @@ mod tests {
             .unwrap_err();
             assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{case_id}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn send_to_shortcuts_roundtrip_through_windows_shell_and_can_be_removed() {
+        let temp = tempdir().unwrap();
+        let create = temp.path().join("Create PNA archive.lnk");
+        let extract = temp.path().join("Extract PNA archive.lnk");
+        let executable = std::env::current_exe().unwrap();
+        let working_directory = executable.parent().unwrap();
+
+        install_send_to_shortcuts(&create, &extract).unwrap();
+
+        assert!(create.is_file());
+        assert!(extract.is_file());
+        for (shortcut, expected_argument) in [(&create, "--create"), (&extract, "--extract")] {
+            let root = std::env::var_os("SystemRoot").unwrap();
+            let powershell = PathBuf::from(root)
+                .join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe");
+            let output = std::process::Command::new(powershell)
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "$ErrorActionPreference = 'Stop'; $shell = New-Object -ComObject WScript.Shell; $shortcut = $shell.CreateShortcut($env:PNA_GUI_VERIFY_SHORTCUT); Write-Output $shortcut.TargetPath; Write-Output $shortcut.Arguments; Write-Output $shortcut.WorkingDirectory",
+                ])
+                .env("PNA_GUI_VERIFY_SHORTCUT", shortcut)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "PowerShell could not read shortcut: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let fields: Vec<_> = String::from_utf8(output.stdout)
+                .unwrap()
+                .lines()
+                .map(str::to_string)
+                .collect();
+            assert_eq!(fields.len(), 3);
+            assert_eq!(fields[0], executable.to_string_lossy());
+            assert_eq!(fields[1], expected_argument);
+            assert_eq!(fields[2], working_directory.to_string_lossy());
+        }
+
+        remove_send_to_shortcuts(&create, &extract).unwrap();
+        assert!(!create.exists());
+        assert!(!extract.exists());
     }
 
     #[cfg(unix)]

@@ -46,6 +46,13 @@ const ENGLISH = {
   openArchiveDescription:
     "Open an existing .pna archive and browse its contents",
   createArchiveDescription: "Create a .pna archive from files and folders",
+  sendToTitle: "Windows Send to menu",
+  sendToDescription:
+    "Create a PNA from selected files or folders, or send a .pna archive to open its extraction dialog.",
+  addToSendTo: "Add to Send to",
+  removeFromSendTo: "Remove from Send to",
+  sendToUpdating: "Updating…",
+  sendToUnavailable: "Unavailable",
   compareArchives: "Compare archives",
   comparison: "Compare",
   comparisonDescription:
@@ -561,6 +568,13 @@ const JAPANESE: Record<TranslationKey, string> = {
   openArchive: "アーカイブを開く",
   openArchiveDescription: "既存の.pnaを開いて内容を確認します",
   createArchiveDescription: "ファイルやフォルダーから.pnaを作成します",
+  sendToTitle: "Windowsの［送る］メニュー",
+  sendToDescription:
+    "選択したファイルやフォルダーからPNAを作成するか、.pnaを展開するダイアログを開きます。",
+  addToSendTo: "［送る］に追加",
+  removeFromSendTo: "［送る］から削除",
+  sendToUpdating: "更新中…",
+  sendToUnavailable: "利用できません",
   compareArchives: "アーカイブを比較",
   comparison: "比較",
   comparisonDescription:

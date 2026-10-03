@@ -31,6 +31,7 @@ import {
   TextField,
 } from "@radix-ui/themes";
 import { getMatches } from "@tauri-apps/plugin-cli";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
@@ -112,6 +113,7 @@ function AppContent() {
     recent: [],
   });
   const [openArchive, setOpenArchive] = useState<OpenArchiveResult>();
+  const [extractOnOpenPath, setExtractOnOpenPath] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<AppErrorDto>();
@@ -135,6 +137,7 @@ function AppContent() {
   }>();
   const openingRef = useRef(false);
   const cliSourceHandledRef = useRef(false);
+  const pendingSendToExtractRef = useRef<string | undefined>(undefined);
   const activeArchiveRef = useRef<ActiveArchiveSession | undefined>(undefined);
   const pendingRefreshRef = useRef<
     { path: string; password?: string } | undefined
@@ -183,6 +186,12 @@ function AppContent() {
       openingRef.current = true;
       setBusy(true);
       setError(undefined);
+      if (
+        pendingSendToExtractRef.current &&
+        pendingSendToExtractRef.current !== path
+      ) {
+        pendingSendToExtractRef.current = undefined;
+      }
       try {
         const result = await archiveApi.open(path, suppliedPassword);
         const previous = activeArchiveRef.current;
@@ -192,6 +201,9 @@ function AppContent() {
         };
         setOpenArchive(result);
         if (showBrowser) setView("browser");
+        setExtractOnOpenPath(
+          pendingSendToExtractRef.current === path ? path : undefined,
+        );
         setPasswordPath(undefined);
         setPassword("");
         setPasswordError(undefined);
@@ -271,7 +283,9 @@ function AppContent() {
     }
     activeArchiveRef.current = undefined;
     pendingRefreshRef.current = undefined;
+    pendingSendToExtractRef.current = undefined;
     setOpenArchive(undefined);
+    setExtractOnOpenPath(undefined);
     setView("home");
     setError(closeError);
   }, [openArchive]);
@@ -322,13 +336,35 @@ function AppContent() {
       void getMatches()
         .then((matches) => {
           const source = matches.args.source?.value;
-          const path =
+          const paths =
             typeof source === "string"
-              ? source
+              ? [source]
               : Array.isArray(source)
-                ? source[0]
-                : null;
-          if (path) return openArchivePath(path);
+                ? source
+                : [];
+          if (matches.args.create?.value === true) {
+            if (paths.length) {
+              creationDraft.setSources(paths);
+              setView("create");
+            }
+            return;
+          }
+          if (matches.args.extract?.value === true) {
+            const archivePath = paths.find((path) =>
+              path.toLowerCase().endsWith(".pna"),
+            );
+            if (!archivePath) {
+              setError(
+                normalizeAppError(
+                  "Choose a .pna archive to send to the Extract PNA archive shortcut.",
+                ),
+              );
+              return;
+            }
+            pendingSendToExtractRef.current = archivePath;
+            return openArchivePath(archivePath);
+          }
+          if (paths[0]) return openArchivePath(paths[0]);
         })
         .catch((caught) => {
           if (!disposed) setError(normalizeAppError(caught));
@@ -338,7 +374,13 @@ function AppContent() {
       disposed = true;
       cleanups.forEach((cleanup) => cleanup());
     };
-  }, [applyZoom, chooseArchive, openArchivePath, view]);
+  }, [
+    applyZoom,
+    chooseArchive,
+    creationDraft.setSources,
+    openArchivePath,
+    view,
+  ]);
 
   const refreshOpenArchive = useCallback(
     async (path: string) => {
@@ -463,6 +505,11 @@ function AppContent() {
           onOpen={chooseArchive}
           onError={setError}
           sessionPassword={activeArchiveRef.current?.password}
+          autoExtract={extractOnOpenPath === openArchive.summary.path}
+          onAutoExtractConsumed={() => {
+            pendingSendToExtractRef.current = undefined;
+            setExtractOnOpenPath(undefined);
+          }}
           onCompare={() => {
             setComparisonView({
               returnView: "browser",
@@ -532,6 +579,10 @@ function AppContent() {
         open={Boolean(passwordPath)}
         onOpenChange={(open) => {
           if (!open) {
+            if (pendingSendToExtractRef.current === passwordPath) {
+              pendingSendToExtractRef.current = undefined;
+              setExtractOnOpenPath(undefined);
+            }
             setPasswordPath(undefined);
             setPassword("");
             setPasswordError(undefined);
@@ -761,6 +812,7 @@ function HomeView({
               <ArrowRightIcon aria-hidden="true" />
             </button>
           </div>
+          <SendToControl />
 
           <section
             className={styles.recentPanel}
@@ -867,6 +919,82 @@ function HomeView({
   );
 }
 
+function SendToControl() {
+  const { t } = useI18n();
+  const [enabled, setEnabled] = useState<boolean | null>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    let disposed = false;
+    if (!isTauri()) {
+      setEnabled(null);
+      return () => {
+        disposed = true;
+      };
+    }
+    try {
+      void invoke<boolean | null>("send_to_status")
+        .then((status) => {
+          if (!disposed) setEnabled(status);
+        })
+        .catch((caught) => {
+          if (!disposed) setError(String(caught));
+        });
+    } catch (caught) {
+      setError(String(caught));
+    }
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const toggle = async () => {
+    if (enabled === null || enabled === undefined || busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const next = await invoke<boolean | null>("set_send_to_enabled", {
+        enabled: !enabled,
+      });
+      setEnabled(next);
+    } catch (caught) {
+      setError(String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (enabled === null || (enabled === undefined && !error)) return null;
+
+  return (
+    <section className={styles.sendToPanel} aria-label={t("sendToTitle")}>
+      <div>
+        <h2>{t("sendToTitle")}</h2>
+        <p>{t("sendToDescription")}</p>
+        {error && (
+          <p role="alert" className={styles.sendToError}>
+            {error}
+          </p>
+        )}
+      </div>
+      <Button
+        variant={enabled ? "soft" : "solid"}
+        disabled={busy || enabled === undefined}
+        onClick={toggle}
+      >
+        {enabled === undefined
+          ? t("sendToUnavailable")
+          : busy
+            ? t("sendToUpdating")
+            : enabled
+              ? t("removeFromSendTo")
+              : t("addToSendTo")}
+      </Button>
+    </section>
+  );
+}
+
 interface BrowserViewProps {
   archive: OpenArchiveResult;
   error?: AppErrorDto;
@@ -876,6 +1004,8 @@ interface BrowserViewProps {
   onError: (error: AppErrorDto) => void;
   onCompare: () => void;
   sessionPassword?: string;
+  autoExtract?: boolean;
+  onAutoExtractConsumed?: () => void;
 }
 
 function BrowserView({
@@ -887,6 +1017,8 @@ function BrowserView({
   onError,
   onCompare,
   sessionPassword,
+  autoExtract = false,
+  onAutoExtractConsumed,
 }: BrowserViewProps) {
   const { locale, t } = useI18n();
   const rootLocation: FolderLocation = { name: t("root"), path: "" };
@@ -967,6 +1099,12 @@ function BrowserView({
       if (target?.isConnected) target.focus();
     });
   };
+
+  useEffect(() => {
+    if (!autoExtract) return;
+    setExtractOpen(true);
+    onAutoExtractConsumed?.();
+  }, [autoExtract, onAutoExtractConsumed]);
 
   const currentTrail = history[historyIndex];
   const current = currentTrail[currentTrail.length - 1];
