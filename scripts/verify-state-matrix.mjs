@@ -3,6 +3,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
+const hasTypeScriptAst =
+  !!ts && typeof ts.createSourceFile === "function" && !!ts.ScriptTarget;
+
 const REQUIRED_COLUMNS = [
   "case_id",
   "feature_id",
@@ -145,6 +148,7 @@ export function normalizeRepositoryPath(repositoryRoot, absolutePath) {
 }
 
 function ungatedNativePickerCalls(path, source) {
+  if (!hasTypeScriptAst) return [];
   const sourceFile = ts.createSourceFile(
     path,
     source,
