@@ -493,7 +493,7 @@ describe("comparison view", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose B" }));
     await screen.findAllByText("/data/a.pna");
 
-    expect(screen.getByText("Choose two different sources.")).toBeVisible();
+    expect(await screen.findByText("Choose two different sources.")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Compare A and B" }),
     ).toBeDisabled();
