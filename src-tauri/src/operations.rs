@@ -9,9 +9,8 @@ use std::{
 };
 
 use libpna::{
-    Archive, Chunk, ChunkType, DirEntryBuilder, EntryName, EntryPart, FileEntryBuilder, Metadata,
-    NormalEntry, PermissionMode, RawChunk, ReadEntry, SolidEntryBuilder, WriteOptions,
-    MIN_CHUNK_BYTES_SIZE, PNA_SIGNATURE,
+    Archive, Chunk, ChunkType, DirEntryBuilder, EntryName, FileEntryBuilder, Metadata, NormalEntry,
+    PermissionMode, RawChunk, ReadEntry, SolidEntryBuilder, WriteOptions,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1152,8 +1151,7 @@ where
     ))
 }
 
-const SPLIT_OVERHEAD_BYTES: usize = PNA_SIGNATURE.len() + MIN_CHUNK_BYTES_SIZE * 3 + 8;
-const MIN_SPLIT_BYTES: usize = SPLIT_OVERHEAD_BYTES + MIN_CHUNK_BYTES_SIZE;
+const MIN_SPLIT_BYTES: usize = libpna::MIN_SPLIT_PART_BYTES;
 
 pub fn split_archive<C, P>(
     request: &SplitRequest,
@@ -1195,48 +1193,39 @@ where
     let source_file = fs::File::open(&request.archive_path)?;
     let mut source = Archive::read_header(source_file)?;
     let mut temp_files = TempFiles::default();
-    let first_temp = unique_sibling_path(&public_path(1), "partial")?;
-    temp_files.paths.push(first_temp.clone());
-    let first_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&first_temp)?;
-    let mut writer = Archive::write_header(first_file)?;
-    let capacity = request.max_part_bytes - SPLIT_OVERHEAD_BYTES;
-    let mut written = 0_usize;
-    let mut part_number = 1_usize;
+    let part_count = std::cell::Cell::new(0_usize);
+    let mut writer = Archive::write_split_header(request.max_part_bytes, |index| {
+        check_cancelled(&cancelled)?;
+        let part = index as usize + 1;
+        let public = public_path(part);
+        if public.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("split output already exists: {}", public.display()),
+            ));
+        }
+        let temp = unique_sibling_path(&public, "partial")?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        temp_files.paths.push(temp);
+        part_count.set(part);
+        Ok(file)
+    })?;
 
     for (entry_index, entry) in source.raw_entries().enumerate() {
         check_cancelled(&cancelled)?;
-        let part = EntryPart::from(entry?);
-        let pieces = split_entry_part(part.as_ref(), capacity - written, capacity)?;
-        for piece in pieces {
-            if written + piece.bytes_len() > capacity {
-                part_number += 1;
-                if public_path(part_number).exists() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::AlreadyExists,
-                        format!(
-                            "split output already exists: {}",
-                            public_path(part_number).display()
-                        ),
-                    ));
-                }
-                let temp = unique_sibling_path(&public_path(part_number), "partial")?;
-                temp_files.paths.push(temp.clone());
-                let file = OpenOptions::new().write(true).create_new(true).open(temp)?;
-                writer = writer.split_to_next_archive(file)?;
-                written = 0;
-            }
-            written += writer.add_entry_part(piece)?;
-        }
+        writer.add_entry(entry?)?;
         progress(
             entry_index as u64 + 1,
             total_entries,
-            &public_path(part_number).to_string_lossy(),
+            &public_path(part_count.get()).to_string_lossy(),
         );
     }
-    writer.finalize()?.sync_all()?;
+    let parts = writer.finalize()?;
+    let part_number = parts.parts() as usize;
+    parts.into_inner().sync_all()?;
     check_cancelled(&cancelled)?;
     // Publish part 1 last. Its presence is the completeness marker used by
     // discovery, so a publication failure can never leave a truncated prefix
@@ -1252,38 +1241,6 @@ where
         completed_items: part_number as u64,
         warnings: Vec::new(),
     })
-}
-
-fn split_entry_part<'a>(
-    mut part: EntryPart<&'a [u8]>,
-    first: usize,
-    max: usize,
-) -> io::Result<Vec<EntryPart<&'a [u8]>>> {
-    let mut pieces = Vec::new();
-    let mut limit = first;
-    loop {
-        match part.try_split(limit) {
-            Ok((piece, Some(remaining))) => {
-                pieces.push(piece);
-                part = remaining;
-                limit = max;
-            }
-            Ok((piece, None)) => {
-                pieces.push(piece);
-                return Ok(pieces);
-            }
-            Err(unsplit) if limit < max && pieces.is_empty() => {
-                part = unsplit;
-                limit = max;
-            }
-            Err(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("an archive chunk cannot fit within a {max}-byte part"),
-                ));
-            }
-        }
-    }
 }
 
 pub fn concat_archives<C, P>(
@@ -2599,6 +2556,9 @@ mod tests {
             .map(|part| output_dir.join(format!("large.part{part}.pna")))
             .collect::<Vec<_>>();
         assert!(parts.iter().all(|part| part.is_file()));
+        assert!(parts
+            .iter()
+            .all(|part| fs::metadata(part).unwrap().len() <= 512));
 
         concat_archives(
             &ConcatRequest {
@@ -2611,6 +2571,17 @@ mod tests {
         .unwrap();
 
         assert_eq!(archive_names(&restored, None), vec!["payload.bin"]);
+        let mut archive = Archive::read_header(fs::File::open(&restored).unwrap()).unwrap();
+        let ReadEntry::Normal(entry) = archive.entries().next().unwrap().unwrap() else {
+            panic!("expected a normal entry");
+        };
+        let mut restored_payload = Vec::new();
+        entry
+            .reader(ReadOptions::builder().build())
+            .unwrap()
+            .read_to_end(&mut restored_payload)
+            .unwrap();
+        assert_eq!(restored_payload, payload);
         assert_eq!(
             Sha256::digest(fs::read(&archive_path).unwrap()),
             original_hash
