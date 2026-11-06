@@ -521,7 +521,7 @@ fn build_index(
                 (_, Some(id)) => Some(id.get().to_string()),
                 _ => None,
             },
-            xattr_count: entry.xattrs().len(),
+            xattr_count: entry.metadata().xattrs().len(),
         };
         insert_parent_directories(&mut raw_entries, &path);
         raw_entries.insert(path, indexed);
@@ -562,7 +562,7 @@ fn scan_archive(path: &Path) -> Result<(bool, bool, Vec<String>, Vec<String>), A
                 let compression_name = compression_name(entry.compression()).to_string();
                 let encryption_name = encryption_name(entry.encryption()).to_string();
                 push_unique(&mut compression, &compression_name);
-                if entry.encryption() != Encryption::No {
+                if entry.encryption() != Encryption::NO {
                     encrypted = true;
                     push_unique(&mut encryption, &encryption_name);
                 }
@@ -572,7 +572,7 @@ fn scan_archive(path: &Path) -> Result<(bool, bool, Vec<String>, Vec<String>), A
                 let compression_name = compression_name(entry.compression()).to_string();
                 let encryption_name = encryption_name(entry.encryption()).to_string();
                 push_unique(&mut compression, &compression_name);
-                if entry.encryption() != Encryption::No {
+                if entry.encryption() != Encryption::NO {
                     encrypted = true;
                     push_unique(&mut encryption, &encryption_name);
                 }
@@ -596,7 +596,7 @@ fn validate_entry_password(
         .iter()
         .find(|chunk| chunk.ty() == digest_type)
         .map(|chunk| chunk.data());
-    if expected_digest.is_none() && entry.header().compression() == Compression::No {
+    if expected_digest.is_none() && entry.header().compression() == Compression::NO {
         // Store encryption has no decompressor failure that can distinguish a
         // correct password from plausible garbage. Refuse plaintext unless an
         // integrity digest makes password verification deterministic.
@@ -862,9 +862,9 @@ fn map_archive_error(_error: io::Error, password_supplied: bool) -> AppErrorDto 
 
 fn compression_name(value: Compression) -> &'static str {
     match value {
-        Compression::No => "Store",
-        Compression::Deflate => "Deflate",
-        Compression::ZStandard => "Zstandard",
+        Compression::NO => "Store",
+        Compression::DEFLATE => "Deflate",
+        Compression::ZSTANDARD => "Zstandard",
         Compression::XZ => "XZ",
         value if value.is_reserved() || value.is_private() => "Unknown",
         _ => "Unknown",
@@ -960,7 +960,7 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
 
-    use libpna::{EntryBuilder, EntryName, WriteOptions};
+    use libpna::{DirEntryBuilder, EntryName, FileEntryBuilder, WriteOptions};
     use sha2::Digest;
     use tempfile::tempdir;
 
@@ -1099,11 +1099,12 @@ mod tests {
         let file = fs::File::create(&path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let options = WriteOptions::builder()
-            .encryption(Encryption::Aes)
+            .encryption(Encryption::AES)
             .password(Some("secret"))
             .build();
         let mut entry =
-            EntryBuilder::new_file(EntryName::from("docs/readme.txt"), options).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from("docs/readme.txt"), options)
+                .unwrap();
         entry.write_all(plaintext).unwrap();
         entry.add_extra_chunk(libpna::RawChunk::from_data(
             libpna::ChunkType::private(crate::operations::PLAINTEXT_DIGEST_CHUNK_BYTES).unwrap(),
@@ -1129,10 +1130,11 @@ mod tests {
         let file = fs::File::create(&path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let options = WriteOptions::builder()
-            .encryption(Encryption::Aes)
+            .encryption(Encryption::AES)
             .password(Some("correct"))
             .build();
-        let mut entry = EntryBuilder::new_file(EntryName::from("legacy.txt"), options).unwrap();
+        let mut entry =
+            FileEntryBuilder::new_with_options(EntryName::from("legacy.txt"), options).unwrap();
         entry.write_all(b"legacy plaintext").unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -1416,8 +1418,8 @@ mod tests {
         assert_eq!(kind_name(DataKind::SYMBOLIC_LINK), "symlink");
         assert_eq!(kind_name(DataKind::HARD_LINK), "hardlink");
         assert_eq!(compression_name(Compression::NO), "Store");
-        assert_eq!(compression_name(Compression::Deflate), "Deflate");
-        assert_eq!(compression_name(Compression::ZStandard), "Zstandard");
+        assert_eq!(compression_name(Compression::DEFLATE), "Deflate");
+        assert_eq!(compression_name(Compression::ZSTANDARD), "Zstandard");
         assert_eq!(compression_name(Compression::XZ), "XZ");
         assert_eq!(encryption_name(Encryption::NO), "None");
         assert_eq!(encryption_name(Encryption::AES), "AES");
@@ -1499,12 +1501,15 @@ mod tests {
         let mut archive = Archive::write_header(file).unwrap();
         for (name, content) in entries {
             let entry = if let Some(content) = content {
-                let mut builder =
-                    EntryBuilder::new_file(EntryName::from(*name), WriteOptions::store()).unwrap();
+                let mut builder = FileEntryBuilder::new_with_options(
+                    EntryName::from(*name),
+                    WriteOptions::store(),
+                )
+                .unwrap();
                 builder.write_all(content).unwrap();
                 builder.build().unwrap()
             } else {
-                EntryBuilder::new_dir(EntryName::from(*name))
+                DirEntryBuilder::new(EntryName::from(*name))
                     .build()
                     .unwrap()
             };
@@ -1524,23 +1529,27 @@ mod tests {
     fn write_test_archive(path: &Path, solid: bool, encrypted: bool) {
         let file = fs::File::create(path).unwrap();
         let mut options = WriteOptions::builder();
-        options.compression(Compression::ZStandard);
+        options.compression(Compression::ZSTANDARD);
         if encrypted {
-            options.encryption(Encryption::Aes).password(Some("secret"));
+            options.encryption(Encryption::AES).password(Some("secret"));
         }
         if solid {
             let mut archive = Archive::write_solid_header(file, options.build()).unwrap();
-            let mut entry =
-                EntryBuilder::new_file(EntryName::from("docs/readme.txt"), WriteOptions::store())
-                    .unwrap();
+            let mut entry = FileEntryBuilder::new_with_options(
+                EntryName::from("docs/readme.txt"),
+                WriteOptions::store(),
+            )
+            .unwrap();
             entry.write_all(b"hello from pna").unwrap();
             archive.add_entry(entry.build().unwrap()).unwrap();
             archive.finalize().unwrap();
         } else {
             let mut archive = Archive::write_header(file).unwrap();
-            let mut entry =
-                EntryBuilder::new_file(EntryName::from("docs/readme.txt"), options.build())
-                    .unwrap();
+            let mut entry = FileEntryBuilder::new_with_options(
+                EntryName::from("docs/readme.txt"),
+                options.build(),
+            )
+            .unwrap();
             entry.write_all(b"hello from pna").unwrap();
             archive.add_entry(entry.build().unwrap()).unwrap();
             archive.finalize().unwrap();

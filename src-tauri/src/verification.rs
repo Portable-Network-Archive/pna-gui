@@ -6,7 +6,9 @@ use std::{
 };
 
 use crate::utils::encode_hex;
-use libpna::{Archive, Chunk, ChunkType, DataKind, Encryption, ReadEntry, ReadOptions, PNA_HEADER};
+use libpna::{
+    Archive, Chunk, ChunkType, DataKind, Encryption, ReadEntry, ReadOptions, PNA_SIGNATURE,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -234,7 +236,7 @@ where
     };
     // Framing around each chunk body: 4-byte length, 4-byte type, 4-byte CRC.
     const CHUNK_FRAMING_BYTES: u64 = 12;
-    let mut completed_bytes = PNA_HEADER.len() as u64;
+    let mut completed_bytes = PNA_SIGNATURE.len() as u64;
     let total_bytes = metadata.len();
     let chunks = match libpna::read_as_chunks(fs::File::open(&request.archive_path)?) {
         Ok(chunks) => chunks,
@@ -343,10 +345,10 @@ where
         entries_checked += 1;
         match entry {
             ReadEntry::Normal(entry) => {
-                encrypted |= entry.encryption() != Encryption::No;
+                encrypted |= entry.encryption() != Encryption::NO;
             }
             ReadEntry::Solid(entry) => {
-                let group_encrypted = entry.encryption() != Encryption::No;
+                let group_encrypted = entry.encryption() != Encryption::NO;
                 encrypted |= group_encrypted;
                 solid_encrypted |= group_encrypted;
                 solid = true;
@@ -469,7 +471,7 @@ where
             }
         };
         processed += 1;
-        any_file_entry |= entry.header().data_kind() == DataKind::File;
+        any_file_entry |= entry.header().data_kind() == DataKind::FILE;
         let path = entry.header().path().as_str().to_string();
         if let Err(error) = crate::safe_relative_entry_path(entry.header().path().as_path()) {
             checks.push(failed_check(
@@ -480,9 +482,9 @@ where
             progress(processed, total, &path);
             continue;
         }
-        let entry_encrypted = entry.header().encryption() != Encryption::No;
+        let entry_encrypted = entry.header().encryption() != Encryption::NO;
         match entry.header().data_kind() {
-            DataKind::File => {
+            DataKind::FILE => {
                 let expected_digest = entry
                     .extra_chunks()
                     .iter()
@@ -493,7 +495,7 @@ where
                 // Compressed content is exempt because decompressing garbage
                 // fails loudly.
                 if entry_encrypted
-                    && entry.header().compression() == libpna::Compression::No
+                    && entry.header().compression() == libpna::Compression::NO
                     && expected_digest.is_none()
                 {
                     record_content_not_checked(
@@ -582,12 +584,12 @@ where
                     }
                 }
             }
-            DataKind::Directory => checks.push(passed_entry(
+            DataKind::DIRECTORY => checks.push(passed_entry(
                 VerificationCheckCode::DirectoryEntry,
                 path.clone(),
                 None,
             )),
-            DataKind::SymbolicLink | DataKind::HardLink => record_content_not_checked(
+            DataKind::SYMBOLIC_LINK | DataKind::HARD_LINK => record_content_not_checked(
                 &mut checks,
                 &mut content_not_checked,
                 VerificationCheckCode::LinkEntry,
@@ -810,7 +812,8 @@ mod tests {
     use std::{fs, io::Write};
 
     use libpna::{
-        Archive, EntryBuilder, EntryName, EntryReference, SolidEntryBuilder, WriteOptions,
+        Archive, DirEntryBuilder, EntryName, EntryReference, FileEntryBuilder, SolidEntryBuilder,
+        SymlinkEntryBuilder, WriteOptions,
     };
     use tempfile::tempdir;
 
@@ -821,11 +824,12 @@ mod tests {
         let file = fs::File::create(path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let options = WriteOptions::builder()
-            .encryption(libpna::Encryption::Aes)
+            .encryption(libpna::Encryption::AES)
             .cipher_mode(libpna::CipherMode::CTR)
             .password(Some(password))
             .build();
-        let mut entry = EntryBuilder::new_file(EntryName::from("secret.txt"), options).unwrap();
+        let mut entry =
+            FileEntryBuilder::new_with_options(EntryName::from("secret.txt"), options).unwrap();
         entry.write_all(content).unwrap();
         if with_digest {
             entry.add_extra_chunk(libpna::RawChunk::from_data(
@@ -841,11 +845,12 @@ mod tests {
         let file = fs::File::create(path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let options = WriteOptions::builder()
-            .compression(libpna::Compression::ZStandard)
-            .encryption(libpna::Encryption::Aes)
+            .compression(libpna::Compression::ZSTANDARD)
+            .encryption(libpna::Encryption::AES)
             .password(Some(password))
             .build();
-        let mut entry = EntryBuilder::new_file(EntryName::from("secret.txt"), options).unwrap();
+        let mut entry =
+            FileEntryBuilder::new_with_options(EntryName::from("secret.txt"), options).unwrap();
         entry.write_all(b"compressed encrypted payload").unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -855,13 +860,14 @@ mod tests {
         let file = fs::File::create(path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let options = WriteOptions::builder()
-            .compression(libpna::Compression::ZStandard)
-            .encryption(libpna::Encryption::Aes)
+            .compression(libpna::Compression::ZSTANDARD)
+            .encryption(libpna::Encryption::AES)
             .password(Some(password))
             .build();
         let mut solid = SolidEntryBuilder::new(options).unwrap();
         let mut entry =
-            EntryBuilder::new_file(EntryName::from("solid.txt"), WriteOptions::store()).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from("solid.txt"), WriteOptions::store())
+                .unwrap();
         entry.write_all(b"solid encrypted payload").unwrap();
         solid.add_entry(entry.build().unwrap()).unwrap();
         archive.add_entry(solid.build().unwrap()).unwrap();
@@ -875,8 +881,11 @@ mod tests {
         let archive_path = temp.path().join("mutated.pna");
         let file = fs::File::create(&archive_path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
-        let mut entry =
-            EntryBuilder::new_file(EntryName::from("readme.txt"), WriteOptions::store()).unwrap();
+        let mut entry = FileEntryBuilder::new_with_options(
+            EntryName::from("readme.txt"),
+            WriteOptions::store(),
+        )
+        .unwrap();
         entry.write_all(b"verified payload").unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -912,8 +921,11 @@ mod tests {
         let archive_path = temp.path().join("valid.pna");
         let file = fs::File::create(&archive_path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
-        let mut entry =
-            EntryBuilder::new_file(EntryName::from("readme.txt"), WriteOptions::store()).unwrap();
+        let mut entry = FileEntryBuilder::new_with_options(
+            EntryName::from("readme.txt"),
+            WriteOptions::store(),
+        )
+        .unwrap();
         entry.write_all(b"verified payload").unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -967,10 +979,10 @@ mod tests {
         let archive_path = temp.path().join("complete.pna");
         let file = fs::File::create(&archive_path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
-        let mut entry = EntryBuilder::new_file(
+        let mut entry = FileEntryBuilder::new_with_options(
             EntryName::from("docs/readme.txt"),
             WriteOptions::builder()
-                .compression(libpna::Compression::ZStandard)
+                .compression(libpna::Compression::ZSTANDARD)
                 .build(),
         )
         .unwrap();
@@ -1007,7 +1019,8 @@ mod tests {
         let file = fs::File::create(&archive_path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let mut entry =
-            EntryBuilder::new_file(EntryName::from("data.txt"), WriteOptions::store()).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from("data.txt"), WriteOptions::store())
+                .unwrap();
         entry.write_all(b"recognizable payload").unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -1165,11 +1178,13 @@ mod tests {
         let file = fs::File::create(&archive_path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let mut reserved =
-            EntryBuilder::new_file(EntryName::from("aux.txt"), WriteOptions::store()).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from("aux.txt"), WriteOptions::store())
+                .unwrap();
         reserved.write_all(b"reserved name").unwrap();
         archive.add_entry(reserved.build().unwrap()).unwrap();
         let mut valid =
-            EntryBuilder::new_file(EntryName::from("valid.txt"), WriteOptions::store()).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from("valid.txt"), WriteOptions::store())
+                .unwrap();
         valid.write_all(b"valid").unwrap();
         archive.add_entry(valid.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -1291,18 +1306,20 @@ mod tests {
         let file = fs::File::create(&archive_path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let options = WriteOptions::builder()
-            .compression(libpna::Compression::ZStandard)
-            .encryption(libpna::Encryption::Aes)
+            .compression(libpna::Compression::ZSTANDARD)
+            .encryption(libpna::Encryption::AES)
             .password(Some("correct-password"))
             .build();
         let mut solid = SolidEntryBuilder::new(options).unwrap();
         let mut inner =
-            EntryBuilder::new_file(EntryName::from("solid.txt"), WriteOptions::store()).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from("solid.txt"), WriteOptions::store())
+                .unwrap();
         inner.write_all(b"solid payload").unwrap();
         solid.add_entry(inner.build().unwrap()).unwrap();
         archive.add_entry(solid.build().unwrap()).unwrap();
         let mut plain =
-            EntryBuilder::new_file(EntryName::from("after.txt"), WriteOptions::store()).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from("after.txt"), WriteOptions::store())
+                .unwrap();
         plain.write_all(b"after").unwrap();
         archive.add_entry(plain.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -1375,7 +1392,7 @@ mod tests {
         let mut archive = Archive::write_header(file).unwrap();
         archive
             .add_entry(
-                EntryBuilder::new_dir(EntryName::from("documents"))
+                DirEntryBuilder::new(EntryName::from("documents"))
                     .build()
                     .unwrap(),
             )
@@ -1411,7 +1428,7 @@ mod tests {
         let mut archive = Archive::write_header(file).unwrap();
         archive
             .add_entry(
-                EntryBuilder::new_symlink(
+                SymlinkEntryBuilder::new(
                     EntryName::from("shortcut"),
                     EntryReference::from("target"),
                 )
@@ -1481,7 +1498,8 @@ mod tests {
             ),
         ] {
             let mut entry =
-                EntryBuilder::new_file(EntryName::from(name), WriteOptions::store()).unwrap();
+                FileEntryBuilder::new_with_options(EntryName::from(name), WriteOptions::store())
+                    .unwrap();
             entry.write_all(content).unwrap();
             entry.add_extra_chunk(libpna::RawChunk::from_data(
                 plaintext_digest_chunk_type(),
@@ -1528,14 +1546,17 @@ mod tests {
         for index in 0..220 {
             archive
                 .add_entry(
-                    EntryBuilder::new_dir(EntryName::from(format!("directory-{index:03}")))
+                    DirEntryBuilder::new(EntryName::from(format!("directory-{index:03}")))
                         .build()
                         .unwrap(),
                 )
                 .unwrap();
         }
-        let mut broken =
-            EntryBuilder::new_file(EntryName::from("broken.txt"), WriteOptions::store()).unwrap();
+        let mut broken = FileEntryBuilder::new_with_options(
+            EntryName::from("broken.txt"),
+            WriteOptions::store(),
+        )
+        .unwrap();
         broken.write_all(b"broken").unwrap();
         broken.add_extra_chunk(libpna::RawChunk::from_data(
             plaintext_digest_chunk_type(),

@@ -1370,14 +1370,17 @@ mod tests {
         // BE-VERIFY-JOB-REPORT
         use std::io::Write;
 
-        use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
+        use libpna::{Archive, EntryName, FileEntryBuilder, WriteOptions};
 
         let temp = tempdir().unwrap();
         let archive_path = temp.path().join("verify.pna");
         let file = fs::File::create(&archive_path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
-        let mut entry =
-            EntryBuilder::new_file(EntryName::from("readme.txt"), WriteOptions::store()).unwrap();
+        let mut entry = FileEntryBuilder::new_with_options(
+            EntryName::from("readme.txt"),
+            WriteOptions::store(),
+        )
+        .unwrap();
         entry.write_all(b"job report").unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -1426,15 +1429,18 @@ mod tests {
         // BE-REPORT-PERSISTED-LIFECYCLE
         use std::io::Write;
 
-        use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
+        use libpna::{Archive, EntryName, FileEntryBuilder, WriteOptions};
 
         let temp = tempdir().unwrap();
         let archive_path = temp.path().join("verify.pna");
         let store_path = temp.path().join("verification-reports.json");
         let file = fs::File::create(&archive_path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
-        let mut entry =
-            EntryBuilder::new_file(EntryName::from("readme.txt"), WriteOptions::store()).unwrap();
+        let mut entry = FileEntryBuilder::new_with_options(
+            EntryName::from("readme.txt"),
+            WriteOptions::store(),
+        )
+        .unwrap();
         entry.write_all(b"persisted report").unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -1471,7 +1477,7 @@ mod tests {
         // BE-COMPARE-JOB-RESULT-LIFECYCLE, BE-COMPARE-SECRET-NOT-PERSISTED
         use std::io::Write;
 
-        use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
+        use libpna::{Archive, EntryName, FileEntryBuilder, WriteOptions};
 
         let temp = tempdir().unwrap();
         let left = temp.path().join("left.pna");
@@ -1479,8 +1485,11 @@ mod tests {
         for (path, contents) in [(&left, b"left".as_slice()), (&right, b"right".as_slice())] {
             let file = fs::File::create(path).unwrap();
             let mut archive = Archive::write_header(file).unwrap();
-            let mut entry =
-                EntryBuilder::new_file(EntryName::from("file.txt"), WriteOptions::store()).unwrap();
+            let mut entry = FileEntryBuilder::new_with_options(
+                EntryName::from("file.txt"),
+                WriteOptions::store(),
+            )
+            .unwrap();
             entry.write_all(contents).unwrap();
             archive.add_entry(entry.build().unwrap()).unwrap();
             archive.finalize().unwrap();

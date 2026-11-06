@@ -1,6 +1,6 @@
 use std::{env, fs, io::Write, path::PathBuf};
 
-use libpna::{Archive, ChunkType, Encryption, EntryBuilder, EntryName, RawChunk, WriteOptions};
+use libpna::{Archive, ChunkType, Encryption, EntryName, FileEntryBuilder, RawChunk, WriteOptions};
 use sha2::{Digest, Sha256};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,10 +22,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("src/main.rs", "fn main() { println!(\"fixture\"); }\n"),
     ] {
         let options = WriteOptions::builder()
-            .encryption(Encryption::Aes)
+            .encryption(Encryption::AES)
             .password(Some("secret"))
             .build();
-        let mut entry = EntryBuilder::new_file(EntryName::from(path), options)?;
+        let mut entry = FileEntryBuilder::new_with_options(EntryName::from(path), options)?;
         entry.write_all(content.as_bytes())?;
         entry.add_extra_chunk(RawChunk::from_data(
             ChunkType::private(*b"phSh")?,
