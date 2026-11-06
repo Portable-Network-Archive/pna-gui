@@ -3100,15 +3100,6 @@ mod tests {
         assert!(!output.exists());
     }
 
-    fn read_single_normal_entry(path: &Path) -> NormalEntry {
-        let file = fs::File::open(path).unwrap();
-        let mut archive = Archive::read_header(file).unwrap();
-        match archive.entries().next().unwrap().unwrap() {
-            ReadEntry::Normal(entry) => entry,
-            ReadEntry::Solid(_) => panic!("expected a normal entry"),
-        }
-    }
-
     fn archive_names_in_storage_order(path: &Path) -> Vec<String> {
         let file = fs::File::open(path).unwrap();
         let mut archive = Archive::read_header(file).unwrap();
