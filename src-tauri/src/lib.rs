@@ -1,5 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#[cfg(test)]
+use libpna::{HardLinkEntryBuilder, SymlinkEntryBuilder};
 mod comparison;
 mod jobs;
 mod operations;
@@ -15,7 +17,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use libpna::{Archive, EntryBuilder, EntryName, WriteOptions};
+use libpna::{Archive, EntryName, FileEntryBuilder, WriteOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{MenuBuilder, MenuItem, SubmenuBuilder},
@@ -271,9 +273,9 @@ enum Compression {
 impl From<Compression> for libpna::Compression {
     fn from(value: Compression) -> Self {
         match value {
-            Compression::None => Self::No,
-            Compression::Zlib => Self::Deflate,
-            Compression::ZStandard => Self::ZStandard,
+            Compression::None => Self::NO,
+            Compression::Zlib => Self::DEFLATE,
+            Compression::ZStandard => Self::ZSTANDARD,
             Compression::XZ => Self::XZ,
         }
     }
@@ -292,9 +294,9 @@ enum Encryption {
 impl From<Encryption> for libpna::Encryption {
     fn from(value: Encryption) -> Self {
         match value {
-            Encryption::None => Self::No,
-            Encryption::Aes => Self::Aes,
-            Encryption::Camellia => Self::Camellia,
+            Encryption::None => Self::NO,
+            Encryption::Aes => Self::AES,
+            Encryption::Camellia => Self::CAMELLIA,
         }
     }
 }
@@ -364,7 +366,7 @@ where
             .encryption(option.encryption.into())
             .password(option.password.as_ref())
             .build();
-        let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), option)?;
+        let mut entry = FileEntryBuilder::new_with_options(EntryName::from_lossy(file), option)?;
         io::copy(&mut f, &mut entry)?;
         archive.add_entry(entry.build()?)?;
         on_change_entry(Event::Finish, file.as_ref());
@@ -398,7 +400,8 @@ where
     for file in files.iter() {
         on_change_entry(Event::Start, file.as_ref());
         let mut f = fs::File::open(file)?;
-        let mut entry = EntryBuilder::new_file(EntryName::from_lossy(file), WriteOptions::store())?;
+        let mut entry =
+            FileEntryBuilder::new_with_options(EntryName::from_lossy(file), WriteOptions::store())?;
         io::copy(&mut f, &mut entry)?;
         archive.add_entry(entry.build()?)?;
         on_change_entry(Event::Finish, file.as_ref());
@@ -1177,16 +1180,20 @@ mod tests {
             let file = fs::File::create(&archive_path).unwrap();
             let mut archive = Archive::write_header(file).unwrap();
             let entry = if hard_link {
-                EntryBuilder::new_hard_link(EntryName::from("link"), EntryReference::from("target"))
+                HardLinkEntryBuilder::new(EntryName::from("link"), EntryReference::from("target"))
+                    .unwrap()
+                    .build()
                     .unwrap()
             } else {
-                EntryBuilder::new_symlink(
+                SymlinkEntryBuilder::new(
                     EntryName::from("link"),
                     EntryReference::from("../outside"),
                 )
                 .unwrap()
+                .build()
+                .unwrap()
             };
-            archive.add_entry(entry.build().unwrap()).unwrap();
+            archive.add_entry(entry).unwrap();
             archive.finalize().unwrap();
 
             let error = _extract(
@@ -1227,7 +1234,8 @@ mod tests {
         let file = fs::File::create(path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let mut entry =
-            EntryBuilder::new_file(EntryName::from(name), WriteOptions::store()).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from(name), WriteOptions::store())
+                .unwrap();
         entry.write_all(content).unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -1236,7 +1244,7 @@ mod tests {
     fn write_file_archive_preserving_root(path: &Path, name: &str, content: &[u8]) {
         let file = fs::File::create(path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
-        let mut entry = EntryBuilder::new_file(
+        let mut entry = FileEntryBuilder::new_with_options(
             EntryName::from_utf8_preserve_root(name),
             WriteOptions::store(),
         )

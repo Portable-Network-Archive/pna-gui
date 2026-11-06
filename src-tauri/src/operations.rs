@@ -1,3 +1,5 @@
+#[cfg(test)]
+use libpna::{HardLinkEntryBuilder, SymlinkEntryBuilder};
 use std::{
     collections::HashSet,
     fs::{self, OpenOptions},
@@ -7,9 +9,8 @@ use std::{
 };
 
 use libpna::{
-    Archive, Chunk, ChunkType, EntryBuilder, EntryName, EntryPart, Metadata, NormalEntry,
-    PermissionMode, RawChunk, ReadEntry, SolidEntryBuilder, WriteOptions, MIN_CHUNK_BYTES_SIZE,
-    PNA_HEADER,
+    Archive, Chunk, ChunkType, DirEntryBuilder, EntryName, FileEntryBuilder, Metadata, NormalEntry,
+    PermissionMode, RawChunk, ReadEntry, SolidEntryBuilder, WriteOptions,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -263,14 +264,14 @@ where
                 current_item: Some(&relative.to_string_lossy()),
             });
             match entry.header().data_kind() {
-                libpna::DataKind::Directory => {
+                libpna::DataKind::DIRECTORY => {
                     super::create_safe_directory(&root, &canonical_root, &relative)?;
                     if request.restore_permissions {
                         directory_permissions
                             .push((root.join(&relative), entry.metadata().clone()));
                     }
                 }
-                libpna::DataKind::File => {
+                libpna::DataKind::FILE => {
                     let parent = relative.parent().unwrap_or_else(|| Path::new("."));
                     super::create_safe_directory(&root, &canonical_root, parent)?;
                     let requested_path = root.join(&relative);
@@ -291,8 +292,8 @@ where
                             .find(|chunk| chunk.ty() == plaintext_digest_chunk_type())
                             .map(|chunk| chunk.data().to_vec());
                         if expected_digest.is_none()
-                            && entry.header().encryption() != libpna::Encryption::No
-                            && entry.header().compression() == libpna::Compression::No
+                            && entry.header().encryption() != libpna::Encryption::NO
+                            && entry.header().compression() == libpna::Compression::NO
                         {
                             return Err(io::Error::new(
                                 io::ErrorKind::PermissionDenied,
@@ -354,7 +355,7 @@ where
                     completed_units += 1;
                     progress(completed_units, total, &relative.to_string_lossy());
                 }
-                libpna::DataKind::SymbolicLink | libpna::DataKind::HardLink => {
+                libpna::DataKind::SYMBOLIC_LINK | libpna::DataKind::HARD_LINK => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "archive links are not extracted",
@@ -455,7 +456,7 @@ fn preflight_extract(
             continue;
         }
         match entry.header().data_kind() {
-            libpna::DataKind::File => {
+            libpna::DataKind::FILE => {
                 files += 1;
                 if !matches!(request.conflict, ConflictPolicy::Skip)
                     || !root.join(&relative).exists()
@@ -468,8 +469,8 @@ fn preflight_extract(
                     });
                 }
             }
-            libpna::DataKind::Directory => {}
-            libpna::DataKind::SymbolicLink | libpna::DataKind::HardLink => {
+            libpna::DataKind::DIRECTORY => {}
+            libpna::DataKind::SYMBOLIC_LINK | libpna::DataKind::HARD_LINK => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "archive links are not extracted",
@@ -979,7 +980,7 @@ fn rename_entry(
     match entry.try_with_name(name.clone()) {
         Ok(entry) => Ok(entry),
         Err(entry) => {
-            if entry.header().data_kind() != libpna::DataKind::File {
+            if entry.header().data_kind() != libpna::DataKind::FILE {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "this encrypted entry kind cannot be renamed",
@@ -997,7 +998,7 @@ fn rename_entry(
                 .encryption(entry.header().encryption())
                 .cipher_mode(entry.header().cipher_mode())
                 .password(Some(password));
-            let mut builder = EntryBuilder::new_file(name, options.build())?;
+            let mut builder = FileEntryBuilder::new_with_options(name, options.build())?;
             builder.metadata(entry.metadata().clone());
             for chunk in entry.extra_chunks() {
                 builder.add_extra_chunk(chunk.clone());
@@ -1150,8 +1151,7 @@ where
     ))
 }
 
-const SPLIT_OVERHEAD_BYTES: usize = PNA_HEADER.len() + MIN_CHUNK_BYTES_SIZE * 3 + 8;
-const MIN_SPLIT_BYTES: usize = SPLIT_OVERHEAD_BYTES + MIN_CHUNK_BYTES_SIZE;
+const MIN_SPLIT_BYTES: usize = libpna::MIN_SPLIT_PART_BYTES;
 
 pub fn split_archive<C, P>(
     request: &SplitRequest,
@@ -1193,48 +1193,39 @@ where
     let source_file = fs::File::open(&request.archive_path)?;
     let mut source = Archive::read_header(source_file)?;
     let mut temp_files = TempFiles::default();
-    let first_temp = unique_sibling_path(&public_path(1), "partial")?;
-    temp_files.paths.push(first_temp.clone());
-    let first_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&first_temp)?;
-    let mut writer = Archive::write_header(first_file)?;
-    let capacity = request.max_part_bytes - SPLIT_OVERHEAD_BYTES;
-    let mut written = 0_usize;
-    let mut part_number = 1_usize;
+    let part_count = std::cell::Cell::new(0_usize);
+    let mut writer = Archive::write_split_header(request.max_part_bytes, |index| {
+        check_cancelled(&cancelled)?;
+        let part = index as usize + 1;
+        let public = public_path(part);
+        if public.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("split output already exists: {}", public.display()),
+            ));
+        }
+        let temp = unique_sibling_path(&public, "partial")?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        temp_files.paths.push(temp);
+        part_count.set(part);
+        Ok(file)
+    })?;
 
     for (entry_index, entry) in source.raw_entries().enumerate() {
         check_cancelled(&cancelled)?;
-        let part = EntryPart::from(entry?);
-        let pieces = split_entry_part(part.as_ref(), capacity - written, capacity)?;
-        for piece in pieces {
-            if written + piece.bytes_len() > capacity {
-                part_number += 1;
-                if public_path(part_number).exists() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::AlreadyExists,
-                        format!(
-                            "split output already exists: {}",
-                            public_path(part_number).display()
-                        ),
-                    ));
-                }
-                let temp = unique_sibling_path(&public_path(part_number), "partial")?;
-                temp_files.paths.push(temp.clone());
-                let file = OpenOptions::new().write(true).create_new(true).open(temp)?;
-                writer = writer.split_to_next_archive(file)?;
-                written = 0;
-            }
-            written += writer.add_entry_part(piece)?;
-        }
+        writer.add_entry(entry?)?;
         progress(
             entry_index as u64 + 1,
             total_entries,
-            &public_path(part_number).to_string_lossy(),
+            &public_path(part_count.get()).to_string_lossy(),
         );
     }
-    writer.finalize()?.sync_all()?;
+    let parts = writer.finalize()?;
+    let part_number = parts.parts() as usize;
+    parts.into_inner().sync_all()?;
     check_cancelled(&cancelled)?;
     // Publish part 1 last. Its presence is the completeness marker used by
     // discovery, so a publication failure can never leave a truncated prefix
@@ -1250,38 +1241,6 @@ where
         completed_items: part_number as u64,
         warnings: Vec::new(),
     })
-}
-
-fn split_entry_part<'a>(
-    mut part: EntryPart<&'a [u8]>,
-    first: usize,
-    max: usize,
-) -> io::Result<Vec<EntryPart<&'a [u8]>>> {
-    let mut pieces = Vec::new();
-    let mut limit = first;
-    loop {
-        match part.try_split(limit) {
-            Ok((piece, Some(remaining))) => {
-                pieces.push(piece);
-                part = remaining;
-                limit = max;
-            }
-            Ok((piece, None)) => {
-                pieces.push(piece);
-                return Ok(pieces);
-            }
-            Err(unsplit) if limit < max && pieces.is_empty() => {
-                part = unsplit;
-                limit = max;
-            }
-            Err(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("an archive chunk cannot fit within a {max}-byte part"),
-                ));
-            }
-        }
-    }
 }
 
 pub fn concat_archives<C, P>(
@@ -1922,8 +1881,8 @@ fn build_scanned_entry_with_progress(
     let name = EntryName::try_from(scanned.archive_path.as_path())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     if scanned.directory {
-        let mut builder = EntryBuilder::new_dir(name);
-        apply_permissions(&mut builder, &scanned.source_path, options)?;
+        let mut builder = DirEntryBuilder::new(name);
+        builder.metadata(entry_metadata(&scanned.source_path, options)?);
         builder.build()
     } else {
         let mut source = fs::File::open(&scanned.source_path)?;
@@ -1932,8 +1891,8 @@ fn build_scanned_entry_with_progress(
         } else {
             write_options(options)
         };
-        let mut builder = EntryBuilder::new_file(name, entry_options)?;
-        apply_permissions(&mut builder, &scanned.source_path, options)?;
+        let mut builder = FileEntryBuilder::new_with_options(name, entry_options)?;
+        builder.metadata(entry_metadata(&scanned.source_path, options)?);
         let mut digest = Sha256::new();
         let mut buffer = [0_u8; 64 * 1024];
         loop {
@@ -1956,15 +1915,15 @@ fn build_scanned_entry_with_progress(
 
 fn write_options(options: &CreateOptions) -> WriteOptions {
     let compression = match options.compression {
-        CreateCompression::Store => libpna::Compression::No,
-        CreateCompression::Deflate => libpna::Compression::Deflate,
-        CreateCompression::Zstd => libpna::Compression::ZStandard,
+        CreateCompression::Store => libpna::Compression::NO,
+        CreateCompression::Deflate => libpna::Compression::DEFLATE,
+        CreateCompression::Zstd => libpna::Compression::ZSTANDARD,
         CreateCompression::Xz => libpna::Compression::XZ,
     };
     let encryption = match options.encryption {
-        CreateEncryption::None => libpna::Encryption::No,
-        CreateEncryption::Aes => libpna::Encryption::Aes,
-        CreateEncryption::Camellia => libpna::Encryption::Camellia,
+        CreateEncryption::None => libpna::Encryption::NO,
+        CreateEncryption::Aes => libpna::Encryption::AES,
+        CreateEncryption::Camellia => libpna::Encryption::CAMELLIA,
     };
     WriteOptions::builder()
         .compression(compression)
@@ -1973,21 +1932,16 @@ fn write_options(options: &CreateOptions) -> WriteOptions {
         .build()
 }
 
-fn apply_permissions(
-    builder: &mut EntryBuilder,
-    source: &Path,
-    options: &CreateOptions,
-) -> io::Result<()> {
-    if !options.preserve_permissions {
-        return Ok(());
-    }
+fn entry_metadata(source: &Path, options: &CreateOptions) -> io::Result<Metadata> {
+    let metadata = Metadata::new();
     #[cfg(unix)]
-    {
+    if options.preserve_permissions {
         use std::os::unix::fs::PermissionsExt;
         let mode = fs::metadata(source)?.permissions().mode() as u16;
-        builder.permission_mode(PermissionMode::from(mode));
+        return Ok(metadata.with_permission_mode(Some(PermissionMode::from(mode))));
     }
-    Ok(())
+    let _ = (source, options);
+    Ok(metadata)
 }
 
 fn check_cancelled(cancelled: &impl Fn() -> bool) -> io::Result<()> {
@@ -2171,13 +2125,14 @@ mod tests {
         for (name, content) in entries {
             let options = WriteOptions::builder()
                 .encryption(if password.is_some() {
-                    libpna::Encryption::Aes
+                    libpna::Encryption::AES
                 } else {
-                    libpna::Encryption::No
+                    libpna::Encryption::NO
                 })
                 .password(password)
                 .build();
-            let mut entry = EntryBuilder::new_file(EntryName::from(*name), options).unwrap();
+            let mut entry =
+                FileEntryBuilder::new_with_options(EntryName::from(*name), options).unwrap();
             entry.write_all(content).unwrap();
             entry.add_extra_chunk(RawChunk::from_data(
                 plaintext_digest_chunk_type(),
@@ -2601,6 +2556,9 @@ mod tests {
             .map(|part| output_dir.join(format!("large.part{part}.pna")))
             .collect::<Vec<_>>();
         assert!(parts.iter().all(|part| part.is_file()));
+        assert!(parts
+            .iter()
+            .all(|part| fs::metadata(part).unwrap().len() <= 512));
 
         concat_archives(
             &ConcatRequest {
@@ -2613,6 +2571,17 @@ mod tests {
         .unwrap();
 
         assert_eq!(archive_names(&restored, None), vec!["payload.bin"]);
+        let mut archive = Archive::read_header(fs::File::open(&restored).unwrap()).unwrap();
+        let ReadEntry::Normal(entry) = archive.entries().next().unwrap().unwrap() else {
+            panic!("expected a normal entry");
+        };
+        let mut restored_payload = Vec::new();
+        entry
+            .reader(ReadOptions::builder().build())
+            .unwrap()
+            .read_to_end(&mut restored_payload)
+            .unwrap();
+        assert_eq!(restored_payload, payload);
         assert_eq!(
             Sha256::digest(fs::read(&archive_path).unwrap()),
             original_hash
@@ -2873,7 +2842,8 @@ mod tests {
             let file = fs::File::create(&source).unwrap();
             let mut archive = Archive::write_header(file).unwrap();
             let mut builder =
-                EntryBuilder::new_file("meta.txt".into(), WriteOptions::store()).unwrap();
+                FileEntryBuilder::new_with_options("meta.txt".into(), WriteOptions::store())
+                    .unwrap();
             builder.metadata(
                 Metadata::new()
                     .with_created(Some(Duration::seconds(123)))
@@ -2933,7 +2903,7 @@ mod tests {
                 .unwrap();
             assert_eq!(removed.metadata().created(), None);
             assert_eq!(removed.metadata().permission_mode(), None);
-            assert!(removed.xattrs().is_empty());
+            assert!(removed.metadata().xattrs().is_empty());
             assert!(removed.extra_chunks().is_empty());
 
             let retained = temp.path().join("retained.pna");
@@ -2969,7 +2939,7 @@ mod tests {
                 retained.metadata().permission_mode(),
                 Some(PermissionMode::from(0o640))
             );
-            assert_eq!(retained.xattrs().len(), 1);
+            assert_eq!(retained.metadata().xattrs().len(), 1);
             assert!(retained
                 .extra_chunks()
                 .iter()
@@ -3104,7 +3074,8 @@ mod tests {
                 vec![marker[0]],
             ));
             let mut entry =
-                EntryBuilder::new_file(EntryName::from(name), WriteOptions::store()).unwrap();
+                FileEntryBuilder::new_with_options(EntryName::from(name), WriteOptions::store())
+                    .unwrap();
             entry.write_all(name.as_bytes()).unwrap();
             group.add_entry(entry.build().unwrap()).unwrap();
             archive.add_entry(group.build().unwrap()).unwrap();
@@ -3127,15 +3098,6 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::Unsupported);
         assert!(error.to_string().contains("metadata"));
         assert!(!output.exists());
-    }
-
-    fn read_single_normal_entry(path: &Path) -> NormalEntry {
-        let file = fs::File::open(path).unwrap();
-        let mut archive = Archive::read_header(file).unwrap();
-        match archive.entries().next().unwrap().unwrap() {
-            ReadEntry::Normal(entry) => entry,
-            ReadEntry::Solid(_) => panic!("expected a normal entry"),
-        }
     }
 
     fn archive_names_in_storage_order(path: &Path) -> Vec<String> {
@@ -3460,15 +3422,16 @@ mod tests {
 
     fn write_solid_archive(path: &Path, entries: &[(&str, &[u8])], password: &str) {
         let options = WriteOptions::builder()
-            .compression(libpna::Compression::ZStandard)
-            .encryption(libpna::Encryption::Aes)
+            .compression(libpna::Compression::ZSTANDARD)
+            .encryption(libpna::Encryption::AES)
             .password(Some(password))
             .build();
         let file = fs::File::create(path).unwrap();
         let mut archive = Archive::write_solid_header(file, options).unwrap();
         for (name, content) in entries {
             let mut builder =
-                EntryBuilder::new_file(EntryName::from(*name), WriteOptions::store()).unwrap();
+                FileEntryBuilder::new_with_options(EntryName::from(*name), WriteOptions::store())
+                    .unwrap();
             builder.write_all(content).unwrap();
             archive.add_entry(builder.build().unwrap()).unwrap();
         }
@@ -3570,10 +3533,11 @@ mod tests {
             ("private/secret.txt", b"not selected".as_slice()),
         ] {
             let options = WriteOptions::builder()
-                .encryption(libpna::Encryption::Aes)
+                .encryption(libpna::Encryption::AES)
                 .password(Some("correct"))
                 .build();
-            let mut entry = EntryBuilder::new_file(EntryName::from(name), options).unwrap();
+            let mut entry =
+                FileEntryBuilder::new_with_options(EntryName::from(name), options).unwrap();
             entry.write_all(content).unwrap();
             entry.add_extra_chunk(RawChunk::from_data(
                 plaintext_digest_chunk_type(),
@@ -3690,16 +3654,20 @@ mod tests {
             let file = fs::File::create(&archive_path).unwrap();
             let mut archive = Archive::write_header(file).unwrap();
             let entry = if hard_link {
-                EntryBuilder::new_hard_link(EntryName::from("link"), EntryReference::from("target"))
+                HardLinkEntryBuilder::new(EntryName::from("link"), EntryReference::from("target"))
+                    .unwrap()
+                    .build()
                     .unwrap()
             } else {
-                EntryBuilder::new_symlink(
+                SymlinkEntryBuilder::new(
                     EntryName::from("link"),
                     EntryReference::from("../outside"),
                 )
                 .unwrap()
+                .build()
+                .unwrap()
             };
-            archive.add_entry(entry.build().unwrap()).unwrap();
+            archive.add_entry(entry).unwrap();
             archive.finalize().unwrap();
             let destination = temp.path().join("restore");
 
