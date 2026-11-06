@@ -484,9 +484,9 @@ where
         crate::safe_relative_entry_path(entry.header().path().as_path())?;
         let metadata = entry.metadata();
         let data_kind = entry.header().data_kind();
-        let encrypted_store_without_integrity = data_kind == DataKind::File
-            && entry.header().encryption() != libpna::Encryption::No
-            && entry.header().compression() == libpna::Compression::No
+        let encrypted_store_without_integrity = data_kind == DataKind::FILE
+            && entry.header().encryption() != libpna::Encryption::NO
+            && entry.header().compression() == libpna::Compression::NO
             && entry.extra_chunks().iter().all(|chunk| {
                 chunk.ty()
                     != libpna::ChunkType::private(crate::operations::PLAINTEXT_DIGEST_CHUNK_BYTES)
@@ -494,7 +494,7 @@ where
             });
         let content_sha256 = if encrypted_store_without_integrity {
             None
-        } else if data_kind == DataKind::File {
+        } else if data_kind == DataKind::FILE {
             let mut reader =
                 entry.reader(ReadOptions::with_password(source.password.as_deref()))?;
             let mut digest = Sha256::new();
@@ -508,8 +508,8 @@ where
                 digest.update(&buffer[..read]);
             }
             let digest = digest.finalize();
-            if entry.header().encryption() != libpna::Encryption::No
-                && entry.header().compression() == libpna::Compression::No
+            if entry.header().encryption() != libpna::Encryption::NO
+                && entry.header().compression() == libpna::Compression::NO
             {
                 let expected = entry
                     .extra_chunks()
@@ -549,6 +549,7 @@ where
             group: archive_group(metadata),
             xattrs: Some(
                 entry
+                    .metadata()
                     .xattrs()
                     .iter()
                     .map(|attribute| {
@@ -833,10 +834,10 @@ fn summarize(differences: &[ComparisonDifference]) -> ComparisonSummary {
 
 fn data_kind_name(kind: DataKind) -> &'static str {
     match kind {
-        DataKind::File => "file",
-        DataKind::Directory => "directory",
-        DataKind::SymbolicLink => "symbolic_link",
-        DataKind::HardLink => "hard_link",
+        DataKind::FILE => "file",
+        DataKind::DIRECTORY => "directory",
+        DataKind::SYMBOLIC_LINK => "symbolic_link",
+        DataKind::HARD_LINK => "hard_link",
         kind if kind.is_reserved() => "reserved",
         kind if kind.is_private() => "private",
         _ => "unknown",
@@ -869,7 +870,7 @@ mod tests {
         sync::atomic::{AtomicUsize, Ordering},
     };
 
-    use libpna::{EntryBuilder, EntryName, EntryReference, WriteOptions};
+    use libpna::{EntryName, EntryReference, FileEntryBuilder, SymlinkEntryBuilder, WriteOptions};
     use tempfile::tempdir;
 
     use super::*;
@@ -879,7 +880,8 @@ mod tests {
         let mut archive = Archive::write_header(file).unwrap();
         for (name, contents) in entries {
             let mut entry =
-                EntryBuilder::new_file(EntryName::from(*name), WriteOptions::store()).unwrap();
+                FileEntryBuilder::new_with_options(EntryName::from(*name), WriteOptions::store())
+                    .unwrap();
             entry.write_all(contents).unwrap();
             archive.add_entry(entry.build().unwrap()).unwrap();
         }
@@ -965,13 +967,14 @@ mod tests {
         let mut archive = Archive::write_header(file).unwrap();
         let mut builder = WriteOptions::builder();
         builder
-            .encryption(libpna::Encryption::Aes)
+            .encryption(libpna::Encryption::AES)
             .password(Some(password));
         if compressed {
-            builder.compression(libpna::Compression::ZStandard);
+            builder.compression(libpna::Compression::ZSTANDARD);
         }
         let mut entry =
-            EntryBuilder::new_file(EntryName::from("secret.txt"), builder.build()).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from("secret.txt"), builder.build())
+                .unwrap();
         entry.write_all(contents).unwrap();
         if with_digest {
             entry.add_extra_chunk(libpna::RawChunk::from_data(
@@ -987,13 +990,14 @@ mod tests {
     fn write_encrypted_solid(path: &Path, password: &str) {
         let file = fs::File::create(path).unwrap();
         let options = WriteOptions::builder()
-            .compression(libpna::Compression::ZStandard)
-            .encryption(libpna::Encryption::Aes)
+            .compression(libpna::Compression::ZSTANDARD)
+            .encryption(libpna::Encryption::AES)
             .password(Some(password))
             .build();
         let mut archive = Archive::write_solid_header(file, options).unwrap();
         let mut entry =
-            EntryBuilder::new_file(EntryName::from("solid.txt"), WriteOptions::store()).unwrap();
+            FileEntryBuilder::new_with_options(EntryName::from("solid.txt"), WriteOptions::store())
+                .unwrap();
         entry.write_all(b"solid comparison payload").unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -1003,9 +1007,11 @@ mod tests {
         let file = fs::File::create(path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         for contents in [b"first".as_slice(), b"second".as_slice()] {
-            let mut entry =
-                EntryBuilder::new_file(EntryName::from("duplicate.txt"), WriteOptions::store())
-                    .unwrap();
+            let mut entry = FileEntryBuilder::new_with_options(
+                EntryName::from("duplicate.txt"),
+                WriteOptions::store(),
+            )
+            .unwrap();
             entry.write_all(contents).unwrap();
             archive.add_entry(entry.build().unwrap()).unwrap();
         }
@@ -1016,7 +1022,7 @@ mod tests {
         let file = fs::File::create(path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let entry =
-            EntryBuilder::new_symlink(EntryName::from("link"), EntryReference::from("../outside"))
+            SymlinkEntryBuilder::new(EntryName::from("link"), EntryReference::from("../outside"))
                 .unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
@@ -1026,8 +1032,12 @@ mod tests {
         let file = fs::File::create(path).unwrap();
         let mut archive = Archive::write_header(file).unwrap();
         let mut entry =
-            EntryBuilder::new_file(EntryName::from("meta.txt"), WriteOptions::store()).unwrap();
-        entry.permission_mode(libpna::PermissionMode::from(permission));
+            FileEntryBuilder::new_with_options(EntryName::from("meta.txt"), WriteOptions::store())
+                .unwrap();
+        entry.metadata(
+            libpna::Metadata::new()
+                .with_permission_mode(Some(libpna::PermissionMode::from(permission))),
+        );
         entry.write_all(b"same content").unwrap();
         archive.add_entry(entry.build().unwrap()).unwrap();
         archive.finalize().unwrap();
