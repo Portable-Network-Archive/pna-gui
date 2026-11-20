@@ -2,6 +2,40 @@ import { test, expect } from "@playwright/experimental-ct-react";
 import { Theme } from "@radix-ui/themes";
 import App from "../../src/App";
 
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === "passed") return;
+  try {
+    const diagnostics = await page.evaluate(() => {
+      const describe = (element: Element | null) =>
+        element
+          ? {
+              tag: element.tagName.toLowerCase(),
+              path: element.getAttribute("data-entry-path"),
+              role: element.getAttribute("role"),
+              label: element.getAttribute("aria-label"),
+              selected: element.getAttribute("aria-selected"),
+              id: element.id,
+            }
+          : null;
+      return {
+        active: describe(document.activeElement),
+        dialogs: Array.from(document.querySelectorAll('[role="dialog"]')).map(
+          describe,
+        ),
+        rows: Array.from(document.querySelectorAll("[data-entry-path]")).map(
+          describe,
+        ),
+        events:
+          (window as Window & { __archiveFocusEvents?: string[] })
+            .__archiveFocusEvents ?? [],
+      };
+    });
+    console.error("Archive layout focus diagnostics:", diagnostics);
+  } catch (error) {
+    console.error("Could not collect archive layout focus diagnostics:", error);
+  }
+});
+
 test("keeps archive controls and selected rows reachable in minimum and zoomed layouts", async ({
   mount,
   page,
@@ -164,6 +198,33 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
       <App />
     </Theme>,
   );
+  await page.evaluate(() => {
+    const events: string[] = [];
+    const name = (target: EventTarget | null) =>
+      target instanceof Element
+        ? `${target.tagName.toLowerCase()}[path=${target.getAttribute("data-entry-path") ?? ""}][label=${target.getAttribute("aria-label") ?? ""}]`
+        : "unknown";
+    document.addEventListener(
+      "focusin",
+      (event) => events.push(`focusin: ${name(event.target)}`),
+      true,
+    );
+    document.addEventListener(
+      "focusout",
+      (event) => events.push(`focusout: ${name(event.target)}`),
+      true,
+    );
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (["ArrowUp", "ArrowDown", "Escape"].includes(event.key))
+          events.push(`keydown: ${event.key}, target=${name(event.target)}`);
+      },
+      true,
+    );
+    (window as Window & { __archiveFocusEvents?: string[] })
+      .__archiveFocusEvents = events;
+  });
 
   await page.getByRole("button", { name: /^distribution-archive.pna/ }).click();
   await page.getByRole("dialog").locator("input[type=password]").fill("secret");
