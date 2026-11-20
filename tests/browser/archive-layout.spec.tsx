@@ -233,6 +233,8 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
     .getByRole("button", { name: "Open", exact: true })
     .click();
   await page.getByTestId("archive-browser").waitFor();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByTestId("archive-home")).toBeFocused();
   const insideViewport = async (locator: ReturnType<typeof page.getByRole>) => {
     const box = await locator.boundingBox();
     expect(box).not.toBeNull();
@@ -269,9 +271,16 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);
-    await page.getByRole("button", { name: "Details", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Inspector" })).toBeVisible();
+    const detailsButton = page.getByRole("button", {
+      name: "Details",
+      exact: true,
+    });
+    await detailsButton.click();
+    const inspector = page.getByRole("dialog", { name: "Inspector" });
+    await expect(inspector).toBeVisible();
     await page.keyboard.press("Escape");
+    await expect(inspector).toBeHidden();
+    await expect(detailsButton).toBeFocused();
     const extractButton = page.getByRole("button", {
       name: "Extract",
       exact: true,
