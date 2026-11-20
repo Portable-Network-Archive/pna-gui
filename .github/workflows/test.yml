@@ -56,7 +56,9 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: run visual component tests
         if: matrix.platform == 'ubuntu-latest'
-        run: npm run test:browser
+        run: |
+          npm run test:browser
+          npm run test:browser -- tests/browser/archive-layout.spec.tsx --repeat-each=40
       - name: upload Playwright failure trace
         if: ${{ failure() && matrix.platform == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v4
