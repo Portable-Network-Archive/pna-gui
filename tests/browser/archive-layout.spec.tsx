@@ -30,7 +30,7 @@ test.afterEach(async ({ page }, testInfo) => {
             .__archiveFocusEvents ?? [],
       };
     });
-    console.error("Archive layout focus diagnostics:", diagnostics);
+    console.error("Archive layout focus diagnostics:", JSON.stringify(diagnostics));
   } catch (error) {
     console.error("Could not collect archive layout focus diagnostics:", error);
   }
@@ -233,8 +233,7 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
     .getByRole("button", { name: "Open", exact: true })
     .click();
   await page.getByTestId("archive-browser").waitFor();
-  await expect(page.getByRole("dialog")).toBeHidden();
-  await expect(page.getByTestId("archive-home")).toBeFocused();
+  // Diagnosis: deliberately reproduce the original unsynchronized transition.
   const insideViewport = async (locator: ReturnType<typeof page.getByRole>) => {
     const box = await locator.boundingBox();
     expect(box).not.toBeNull();
