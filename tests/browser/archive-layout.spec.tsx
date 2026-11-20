@@ -188,8 +188,15 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
     await page.setViewportSize({ width, height });
     const row = page.getByRole("row").filter({ hasText: "documents" }).last();
     await row.focus();
+    await expect(row).toBeFocused();
     await page.keyboard.press("ArrowDown");
+    const nextRow = page.locator(
+      '[data-entry-path="monthly-report-with-a-long-descriptive-file-name.txt"]',
+    );
+    await expect(nextRow).toBeFocused();
+    await expect(nextRow).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("ArrowUp");
+    await expect(row).toBeFocused();
     await expect(row).toHaveAttribute("aria-selected", "true");
     await insideViewport(row.getByText("documents", { exact: true }));
     for (const control of [
@@ -204,12 +211,18 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
     await page.getByRole("button", { name: "Details", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Inspector" })).toBeVisible();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Extract", exact: true }).click();
+    const extractButton = page.getByRole("button", {
+      name: "Extract",
+      exact: true,
+    });
+    await extractButton.click();
     const dialog = page.getByRole("dialog", { name: "Extract archive" });
     await expect(dialog.locator("input[type=password]")).toHaveValue("secret");
     const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
     await cancel.scrollIntoViewIfNeeded();
     await insideViewport(cancel);
     await cancel.click();
+    await expect(dialog).toBeHidden();
+    await expect(extractButton).toBeFocused();
   }
 });
