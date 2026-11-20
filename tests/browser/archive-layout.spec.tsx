@@ -164,7 +164,6 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
       <App />
     </Theme>,
   );
-
   await page.getByRole("button", { name: /^distribution-archive.pna/ }).click();
   await page.getByRole("dialog").locator("input[type=password]").fill("secret");
   await page
@@ -172,6 +171,9 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
     .getByRole("button", { name: "Open", exact: true })
     .click();
   await page.getByTestId("archive-browser").waitFor();
+  // The password dialog restores focus asynchronously after the browser appears.
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByTestId("archive-home")).toBeFocused();
   const insideViewport = async (locator: ReturnType<typeof page.getByRole>) => {
     const box = await locator.boundingBox();
     expect(box).not.toBeNull();
@@ -188,8 +190,15 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
     await page.setViewportSize({ width, height });
     const row = page.getByRole("row").filter({ hasText: "documents" }).last();
     await row.focus();
+    await expect(row).toBeFocused();
     await page.keyboard.press("ArrowDown");
+    const nextRow = page.locator(
+      '[data-entry-path="monthly-report-with-a-long-descriptive-file-name.txt"]',
+    );
+    await expect(nextRow).toBeFocused();
+    await expect(nextRow).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("ArrowUp");
+    await expect(row).toBeFocused();
     await expect(row).toHaveAttribute("aria-selected", "true");
     await insideViewport(row.getByText("documents", { exact: true }));
     for (const control of [
@@ -201,15 +210,28 @@ test("keeps archive controls and selected rows reachable in minimum and zoomed l
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);
-    await page.getByRole("button", { name: "Details", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Inspector" })).toBeVisible();
+    const detailsButton = page.getByRole("button", {
+      name: "Details",
+      exact: true,
+    });
+    await detailsButton.click();
+    const inspector = page.getByRole("dialog", { name: "Inspector" });
+    await expect(inspector).toBeVisible();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Extract", exact: true }).click();
+    await expect(inspector).toBeHidden();
+    await expect(detailsButton).toBeFocused();
+    const extractButton = page.getByRole("button", {
+      name: "Extract",
+      exact: true,
+    });
+    await extractButton.click();
     const dialog = page.getByRole("dialog", { name: "Extract archive" });
     await expect(dialog.locator("input[type=password]")).toHaveValue("secret");
     const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
     await cancel.scrollIntoViewIfNeeded();
     await insideViewport(cancel);
     await cancel.click();
+    await expect(dialog).toBeHidden();
+    await expect(extractButton).toBeFocused();
   }
 });
